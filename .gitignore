@@ -1,0 +1,20 @@
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies and build output
+**/node_modules/
+**/dist/
+**/coverage/
+**/.angular/
+
+# Logs and local tooling
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db

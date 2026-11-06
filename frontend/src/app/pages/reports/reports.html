@@ -1,0 +1,287 @@
+<section class="reports-page">
+  <header class="page-heading">
+    <div>
+      <span class="eyebrow">BUSINESS PERFORMANCE</span>
+      <h2>Reports &amp; Analytics</h2>
+      <p *ngIf="report?.business">{{ report.business.businessName }} · Tenant-scoped business analytics</p>
+      <p *ngIf="!report">Actual member, membership, attendance, payment and team data.</p>
+    </div>
+    <button class="secondary-btn" type="button" (click)="load()" [disabled]="loading">Refresh reports</button>
+  </header>
+
+  <form class="filter-panel" (ngSubmit)="load()">
+    <label>Reporting period
+      <select name="period" [(ngModel)]="period" (ngModelChange)="setPeriod($event)">
+        <option value="today">Today</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+        <option value="lastMonth">Last Month</option>
+        <option value="year">This Year</option>
+        <option value="custom">Custom Date Range</option>
+      </select>
+    </label>
+    <label *ngIf="period === 'custom'">From
+      <input type="date" name="from" [(ngModel)]="from" required>
+    </label>
+    <label *ngIf="period === 'custom'">To
+      <input type="date" name="to" [(ngModel)]="to" required>
+    </label>
+    <span class="period-chip" *ngIf="period !== 'custom'">{{ from }} to {{ to }}</span>
+    <button class="primary-btn" [disabled]="loading">{{ loading ? 'Generating…' : 'Apply period' }}</button>
+  </form>
+
+  <p class="error-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
+  <p class="loading-message" *ngIf="loading">Calculating reports from saved business records…</p>
+
+  <ng-container *ngIf="report as result">
+    <div class="summary-heading">
+      <div><h3>Reports Overview</h3><span>{{ getPeriodLabel() }}</span></div>
+      <div class="comparison" *ngIf="result.summary.comparison.changePercentage !== null">
+        Revenue {{ result.summary.comparison.changePercentage >= 0 ? 'increased' : 'decreased' }}
+        {{ result.summary.comparison.changePercentage | number:'1.1-1' }}% from previous equal-length period
+      </div>
+      <div class="comparison" *ngIf="result.summary.comparison.changePercentage === null">
+        Previous-period revenue comparison is unavailable because there was no prior collection.
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <article class="summary-card"><span>Total Revenue</span><strong>{{ money(result.summary.totalRevenue) }}</strong><small>Successful transactions only</small></article>
+      <article class="summary-card"><span>Net Collection</span><strong>{{ money(result.summary.netCollection) }}</strong><small>Revenue less recorded refunds</small></article>
+      <article class="summary-card"><span>Pending Fees</span><strong>{{ money(result.summary.pendingFees) }}</strong><small>Current membership balances</small></article>
+      <article class="summary-card"><span>Active Members</span><strong>{{ result.summary.totalActiveMembers | number }}</strong><small>{{ result.summary.totalMembers | number }} total non-deleted members</small></article>
+      <article class="summary-card"><span>New Members</span><strong>{{ result.summary.newMembers | number }}</strong><small>Joined during this period</small></article>
+      <article class="summary-card"><span>Member Retention</span><strong>{{ result.summary.retentionRate == null ? '—' : (result.summary.retentionRate | number:'1.1-1') + '%' }}</strong><small>{{ result.summary.retainedMembers }} retained / {{ result.summary.retentionCohort }} active at period start</small></article>
+      <article class="summary-card"><span>Average Attendance</span><strong>{{ result.summary.averageAttendancePercentage | number:'1.1-1' }}%</strong><small>Daily visits ÷ current active members</small></article>
+      <article class="summary-card"><span>Total Trainers</span><strong>{{ result.summary.totalTrainers | number }}</strong><small>{{ result.summary.activeTrainers }} active · {{ result.summary.assignedTrainerMembers }} assigned members</small></article>
+      <article class="summary-card"><span>Total Staff</span><strong>{{ result.summary.totalStaff | number }}</strong><small>{{ result.summary.activeStaff }} active</small></article>
+    </div>
+
+    <section class="chart-grid">
+      <article class="chart-card">
+        <div class="card-title"><div><h3>Monthly Revenue Trend</h3><p>Successful collections · INR</p></div></div>
+        <div class="bar-list" *ngIf="result.charts.monthlyRevenue.length; else noRevenue">
+          <div class="bar-row" *ngFor="let row of result.charts.monthlyRevenue; trackBy: trackByMonth">
+            <span class="bar-label">{{ row.month }}</span>
+            <div class="bar-track"><div class="bar revenue" [style.width.%]="barWidth(row.amount, result.charts.monthlyRevenue, 'amount')"></div></div>
+            <strong>{{ money(row.amount) }}</strong>
+          </div>
+        </div>
+        <ng-template #noRevenue><p class="empty-state">No successful payments in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Member Growth Trend</h3><p>Members by recorded joining date</p>
+        <div class="bar-list" *ngIf="result.charts.memberGrowth.length; else noGrowth">
+          <div class="bar-row" *ngFor="let row of result.charts.memberGrowth; trackBy: trackByMonth">
+            <span class="bar-label">{{ row.month }}</span>
+            <div class="bar-track"><div class="bar growth" [style.width.%]="barWidth(row.members, result.charts.memberGrowth, 'members')"></div></div>
+            <strong>{{ row.members }}</strong>
+          </div>
+        </div>
+        <ng-template #noGrowth><p class="empty-state">No member registrations in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Attendance Trend</h3><p>Visits grouped by month</p>
+        <div class="bar-list" *ngIf="result.charts.attendanceTrend.length; else noAttendance">
+          <div class="bar-row" *ngFor="let row of result.charts.attendanceTrend; trackBy: trackByMonth">
+            <span class="bar-label">{{ row.month }}</span>
+            <div class="bar-track"><div class="bar attendance" [style.width.%]="barWidth(row.visits, result.charts.attendanceTrend, 'visits')"></div></div>
+            <strong>{{ row.visits }} visits</strong>
+          </div>
+        </div>
+        <ng-template #noAttendance><p class="empty-state">No attendance records in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Membership Plan Distribution</h3><p>Memberships active during the selected period</p>
+        <div class="bar-list" *ngIf="result.charts.membershipPlanDistribution.length; else noPlans">
+          <div class="bar-row" *ngFor="let row of result.charts.membershipPlanDistribution">
+            <span class="bar-label">{{ row.name }}</span>
+            <div class="bar-track"><div class="bar plans" [style.width.%]="barWidth(row.count, result.charts.membershipPlanDistribution, 'count')"></div></div>
+            <strong>{{ row.count }} members</strong>
+          </div>
+        </div>
+        <ng-template #noPlans><p class="empty-state">No active membership plans in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Payment Status Distribution</h3><p>Transactions dated in the selected period</p>
+        <div class="bar-list" *ngIf="result.charts.paymentStatusDistribution.length; else noPaymentStatuses">
+          <div class="bar-row" *ngFor="let row of result.charts.paymentStatusDistribution">
+            <span class="bar-label">{{ row._id }}</span>
+            <div class="bar-track"><div class="bar status-bar" [style.width.%]="barWidth(row.count, result.charts.paymentStatusDistribution, 'count')"></div></div>
+            <strong>{{ row.count }} · {{ money(row.amount) }}</strong>
+          </div>
+        </div>
+        <ng-template #noPaymentStatuses><p class="empty-state">No payment transactions in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Collection by Payment Method</h3><p>Successful payments only</p>
+        <div class="bar-list" *ngIf="result.charts.paymentMethodCollection.length; else noMethods">
+          <div class="bar-row" *ngFor="let row of result.charts.paymentMethodCollection">
+            <span class="bar-label">{{ row._id }}</span>
+            <div class="bar-track"><div class="bar revenue" [style.width.%]="barWidth(row.amount, result.charts.paymentMethodCollection, 'amount')"></div></div>
+            <strong>{{ money(row.amount) }}</strong>
+          </div>
+        </div>
+        <ng-template #noMethods><p class="empty-state">No successful payment methods in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Plan-wise Revenue</h3><p>Successful payments attributed to saved membership plans</p>
+        <div class="bar-list" *ngIf="result.charts.planWiseRevenue.length; else noPlanRevenue">
+          <div class="bar-row" *ngFor="let row of result.charts.planWiseRevenue">
+            <span class="bar-label">{{ row.name }}</span>
+            <div class="bar-track"><div class="bar plans" [style.width.%]="barWidth(row.amount, result.charts.planWiseRevenue, 'amount')"></div></div>
+            <strong>{{ money(row.amount) }}</strong>
+          </div>
+        </div>
+        <ng-template #noPlanRevenue><p class="empty-state">No plan revenue in this period.</p></ng-template>
+      </article>
+
+      <article class="chart-card">
+        <h3>Attendance Patterns</h3><p>Logged attendance records, without duplicate member-level assumptions</p>
+        <div class="pattern-grid">
+          <div><h4>Weekdays</h4><p *ngFor="let day of result.charts.weekdayAttendance">{{ day.day }} <strong>{{ day.visits }}</strong></p><span *ngIf="!result.charts.weekdayAttendance.length" class="empty-state">No records</span></div>
+          <div><h4>Peak hours ({{ result.period.timezone }})</h4><p *ngFor="let hour of result.charts.peakAttendanceHours">{{ hour.hour }}:00 <strong>{{ hour.visits }}</strong></p><span *ngIf="!result.charts.peakAttendanceHours.length" class="empty-state">No records</span></div>
+          <div><h4>Sources</h4><p *ngFor="let source of sourceEntries(result.charts.attendanceSources)">{{ source.key }} <strong>{{ source.value }}</strong></p><span *ngIf="!sourceEntries(result.charts.attendanceSources).length" class="empty-state">No records</span></div>
+        </div>
+      </article>
+
+      <article class="chart-card">
+        <h3>GST &amp; Tax Summary</h3><p>Saved invoice snapshots only · not an official government return</p>
+        <div class="tax-grid">
+          <span>Tax invoices<strong>{{ result.summary.gst.invoices }}</strong></span>
+          <span>Taxable amount<strong>{{ money(result.summary.gst.taxableAmount) }}</strong></span>
+          <span>CGST<strong>{{ money(result.summary.gst.cgst) }}</strong></span>
+          <span>SGST<strong>{{ money(result.summary.gst.sgst) }}</strong></span>
+          <span>IGST<strong>{{ money(result.summary.gst.igst) }}</strong></span>
+          <span>Total saved tax<strong>{{ money(result.summary.gst.tax) }}</strong></span>
+        </div>
+      </article>
+    </section>
+
+    <section class="insights-panel">
+      <div><span class="eyebrow">DATA-BASED OPPORTUNITIES</span><h3>Business Insights</h3></div>
+      <div class="insight-grid">
+        <p *ngIf="result.insights.revenueChange !== null">
+          Revenue {{ result.insights.revenueChange >= 0 ? 'increased' : 'decreased' }} {{ result.insights.revenueChange | number:'1.1-1' }}% compared with the previous equal-length period.
+        </p>
+        <p *ngIf="result.insights.revenueChange === null">Revenue comparison unavailable: no successful payment was recorded in the previous comparable period.</p>
+        <p *ngIf="result.insights.mostPopularPlan">Most represented active plan: <strong>{{ result.insights.mostPopularPlan.name }}</strong> ({{ result.insights.mostPopularPlan.count }} memberships).</p>
+        <p *ngIf="!result.insights.mostPopularPlan">No active plan records are available for this period.</p>
+        <p *ngIf="result.insights.highestRegistrationMonth">Highest registration month in this period: <strong>{{ result.insights.highestRegistrationMonth._id }}</strong> ({{ result.insights.highestRegistrationMonth.count }} new members).</p>
+        <p>{{ result.insights.upcomingRenewals }} memberships expire in the next 30 days.</p>
+        <p>{{ result.insights.expiredMemberships }} memberships have an Expired status in stored records.</p>
+        <p *ngFor="let member of result.insights.lowAttendanceMembers">
+          Low attendance: <strong>{{ member.fullName }}</strong> · {{ member.visits }} attendance day(s) in period.
+          <span *ngIf="member.visits === 0"> No recent visits in selected period.</span>
+        </p>
+        <p *ngIf="result.summary.totalActiveMembers === 0">No currently active members are recorded.</p>
+      </div>
+    </section>
+
+    <section class="detail-panel">
+      <div class="detail-heading">
+        <div><span class="eyebrow">FILTERED RECORDS</span><h3>Detailed Reports</h3><p>Search, sort and export all records matching the selected report filters.</p></div>
+        <div class="export-actions">
+          <button type="button" (click)="export('pdf')" [disabled]="exporting">{{ exporting ? 'Preparing…' : 'PDF' }}</button>
+          <button type="button" (click)="export('excel')" [disabled]="exporting">Excel</button>
+          <button type="button" (click)="export('csv')" [disabled]="exporting">CSV</button>
+          <button type="button" (click)="export('print')" [disabled]="exporting">Print</button>
+        </div>
+      </div>
+
+      <div class="detail-filters">
+        <label>Report
+          <select [(ngModel)]="reportType" name="reportType" (ngModelChange)="changeReport($event)">
+            <optgroup *ngFor="let category of reportGroups" [label]="category">
+              <option *ngFor="let option of reportOptionsFor(category)" [value]="option.value">{{ option.label }}</option>
+            </optgroup>
+          </select>
+        </label>
+        <label>Search member / phone / reference
+          <input [(ngModel)]="search" name="search" (ngModelChange)="onDetailSearchChange()" placeholder="Search matching records">
+        </label>
+        <label *ngIf="['revenue','pending','refunds','failed','gst'].includes(reportType)">Payment status
+          <select [(ngModel)]="paymentStatus" name="paymentStatus">
+            <option value="">All relevant</option><option value="Success">Success</option>
+            <option value="Pending">Pending</option><option value="Failed">Failed</option><option value="Refunded">Refunded</option>
+          </select>
+        </label>
+        <label *ngIf="['revenue','pending','refunds','failed','gst'].includes(reportType)">Payment method
+          <select [(ngModel)]="paymentMethod" name="paymentMethod">
+            <option value="">All methods</option><option>Cash</option><option>UPI</option><option>Card</option><option>Bank Transfer</option><option>Razorpay</option>
+          </select>
+        </label>
+        <label *ngIf="['memberships','expiring','expiredMemberships','renewedMemberships','nonRenewedMembers','unpaid','partial','fullyPaid'].includes(reportType)">Membership plan
+          <select [(ngModel)]="planId" name="planId"><option value="">All plans</option><option *ngFor="let plan of plans" [value]="plan._id">{{ plan.planName }}</option></select>
+        </label>
+        <label *ngIf="['members','newMembers','activeMembers','inactiveMembers','attendance'].includes(reportType)">Trainer
+          <select [(ngModel)]="trainerId" name="trainerId"><option value="">All trainers</option><option *ngFor="let trainer of trainers" [value]="trainer._id">{{ trainer.name }}</option></select>
+        </label>
+        <label *ngIf="reportType === 'attendance'">Attendance status
+          <select [(ngModel)]="attendanceStatus" name="attendanceStatus">
+            <option value="">All statuses</option><option value="Present">Present</option><option value="Absent">Absent</option><option value="Late">Late</option>
+          </select>
+        </label>
+        <label *ngIf="reportType === 'attendance'">Source
+          <select [(ngModel)]="attendanceSource" name="attendanceSource">
+            <option value="">All sources</option><option value="Manual">Manual</option><option value="QR">QR Code</option><option value="Biometric">Biometric (stored records only)</option>
+          </select>
+        </label>
+        <label *ngIf="['trainers','staff'].includes(reportType)">Team status
+          <select [(ngModel)]="teamStatus" name="teamStatus"><option value="">All statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option></select>
+        </label>
+        <label>Sort by
+          <select [(ngModel)]="sortBy" name="sortBy">
+            <option value="paymentDate">Payment date</option><option value="issueDate">Invoice date</option><option value="member.name">Member name</option><option value="joiningDate">Joining date</option>
+            <option value="attendanceDate">Attendance date</option><option value="startDate">Start date</option>
+            <option value="endDate">End date</option><option value="amount">Amount</option>
+            <option value="name">Name</option><option value="status">Status</option>
+          </select>
+        </label>
+        <label>Order
+          <select [(ngModel)]="sortDirection" name="sortDirection"><option value="desc">Newest / highest</option><option value="asc">Oldest / lowest</option></select>
+        </label>
+        <button class="primary-btn" type="button" (click)="loadDetails()" [disabled]="detailLoading">Apply filters</button>
+      </div>
+
+      <p class="error-message" *ngIf="detailError" role="alert">{{ detailError }}</p>
+      <p class="loading-message" *ngIf="detailLoading">Loading matching records…</p>
+      <div class="record-summary" *ngIf="!detailLoading">
+        <span>{{ detailTotal | number }} matching records · Page {{ detailPage }} of {{ detailPages || 1 }}</span>
+        <span *ngIf="detailSummary?.amount">Page-independent amount: {{ money(detailSummary.amount) }}</span>
+      </div>
+      <div class="table-scroll" *ngIf="!detailLoading">
+        <table>
+          <thead><tr><th *ngFor="let column of detailColumns" (click)="sort(column.key)">{{ column.label }} <span *ngIf="sortBy === column.key">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let record of detailRecords"><td *ngFor="let column of detailColumns">{{ getCell(record, column) }}</td></tr>
+            <tr *ngIf="!detailRecords.length"><td class="empty-state" [attr.colspan]="detailColumns.length || 1">No records match this report and filter selection.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" *ngIf="detailPages > 1">
+        <button class="secondary-btn" type="button" [disabled]="detailPage <= 1 || detailLoading" (click)="changePage(-1)">Previous</button>
+        <span>Page {{ detailPage }} of {{ detailPages }}</span>
+        <button class="secondary-btn" type="button" [disabled]="detailPage >= detailPages || detailLoading" (click)="changePage(1)">Next</button>
+      </div>
+    </section>
+
+    <section class="limitations">
+      <h3>Report definitions and data coverage</h3>
+      <p><strong>Retention:</strong> distinct members with a non-cancelled membership covering the period end divided by distinct members with a membership covering the period start. It is not a renewal prediction.</p>
+      <p><strong>Attendance percentage:</strong> average daily attendance visits divided by the current active-member count. Member schedules and expected visit frequency are not stored.</p>
+      <p><strong>Financials:</strong> collected revenue counts only Success transactions. Net collection subtracts full refunds recorded within the selected period. GST totals use stored tax-invoice snapshots only and are not official GST returns.</p>
+      <p *ngIf="!result.capabilities.trainerAttendance || !result.capabilities.staffAttendance">Trainer/staff attendance is unavailable because the system stores member attendance only.</p>
+      <p *ngIf="!result.capabilities.salaryTransactions">Salary paid/pending reports are unavailable because salary transactions are not recorded.</p>
+      <p *ngIf="!result.capabilities.cancellationHistory">Membership cancellation reasons and cancellation percentages are unavailable because cancellation history is not stored.</p>
+      <p>Biometric attendance is only reportable if attendance records already contain that source; no device integration is performed here.</p>
+    </section>
+  </ng-container>
+</section>

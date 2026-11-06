@@ -1,0 +1,503 @@
+<router-outlet></router-outlet>
+
+<div class="session-loading" *ngIf="sessionChecking && !isAuthRoute">
+  <div class="verification-glow"></div>
+  <section class="verification-card" aria-live="polite" aria-busy="true">
+    <div class="verification-brand">
+      <span class="verification-logo">SS</span>
+      <div><strong>SS FITNESS MANAGER</strong><small>Your gym. Your business. One smart platform.</small></div>
+    </div>
+    <div class="verification-shield" aria-hidden="true"><span>✓</span></div>
+    <h1>Verifying your account</h1>
+    <p>Securing your workspace and preparing your dashboard...</p>
+    <div class="verification-spinner" role="status" aria-label="Verifying your session"></div>
+    <div class="verification-security">Secure connection <span>•</span> Protected workspace</div>
+  </section>
+</div>
+
+<div class="session-loading" *ngIf="sessionVerificationError && !sessionChecking && !isAuthRoute">
+  <div class="verification-glow"></div>
+  <section class="verification-card verification-error" role="alert">
+    <div class="verification-brand">
+      <span class="verification-logo">SS</span>
+      <div><strong>SS FITNESS MANAGER</strong><small>Your gym. Your business. One smart platform.</small></div>
+    </div>
+    <div class="verification-shield verification-shield-error" aria-hidden="true">!</div>
+    <h1>We couldn't verify your session</h1>
+    <p>{{ sessionVerificationError }}</p>
+    <div class="verification-actions">
+      <button type="button" class="verification-primary" (click)="retrySessionVerification()">Try again</button>
+      <button type="button" class="verification-secondary" (click)="backToLogin()">Back to Login</button>
+    </div>
+    <div class="verification-security">Secure connection <span>•</span> Protected workspace</div>
+  </section>
+</div>
+
+<div class="session-warning-backdrop" *ngIf="sessionWarning && isAuthenticated">
+  <section class="session-warning" role="dialog" aria-modal="true" aria-labelledby="session-warning-title">
+    <div class="warning-icon" aria-hidden="true">◷</div>
+    <h2 id="session-warning-title">Your session is about to expire</h2>
+    <p>Your session is about to expire due to inactivity.</p>
+    <p class="warning-countdown">Automatic logout in <strong>{{ sessionRemainingLabel }}</strong></p>
+    <div class="warning-actions">
+      <button type="button" class="stay-button" (click)="stayLoggedIn()">Stay Logged In</button>
+      <button type="button" class="logout-now-button" (click)="logout()">Log Out Now</button>
+    </div>
+  </section>
+</div>
+
+<div class="app-layout" *ngIf="!isAuthRoute && isAuthenticated">
+
+  <!-- Mobile Overlay -->
+  <div class="mobile-overlay" *ngIf="mobileMenuOpen" (click)="toggleMobileMenu()"></div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" [class.sidebar-open]="mobileMenuOpen">
+
+    <div class="brand">
+      <div class="brand-logo">SS</div>
+      <div class="brand-text">
+        <h2>SS FITNESS</h2>
+        <span>MANAGER PRO</span>
+      </div>
+      <button class="close-sidebar" (click)="toggleMobileMenu()">×</button>
+    </div>
+
+    <div class="business-switcher">
+      <div class="business-icon">🏋️</div>
+      <div class="business-info">
+        <strong>{{ businessName }}</strong>
+        <span>Business Account</span>
+      </div>
+      <span class="switch-arrow">⌄</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div *ngFor="let group of menuGroups" class="nav-group">
+        <p class="nav-heading">{{ group.title }}</p>
+
+        <button *ngFor="let item of group.items"
+          class="nav-item"
+          [class.active]="selectedMenu === item.name"
+          (click)="selectMenu(item.name)">
+
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span>{{ item.name }}</span>
+          <span *ngIf="item.name === 'Attendance'" class="nav-dot"></span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-bottom">
+      <div class="upgrade-card">
+        <div class="upgrade-icon">✦</div>
+        <h4>Subscription Status</h4>
+        <p>View the status configured for your business account.</p>
+        <button (click)="selectMenu('Subscription')">View Subscription →</button>
+      </div>
+
+      <div class="sidebar-footer">
+        <span>{{ appName }} v{{ appVersion }}</span>
+        <span>© 2026 SS Builds365</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Header -->
+    <header class="topbar">
+      <div class="header-left">
+        <button class="menu-toggle" (click)="toggleMobileMenu()">☰</button>
+        <div>
+          <h1>{{ selectedMenu }}</h1>
+          <p>Welcome back, {{ ownerName }}! Here's what's happening today.</p>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="date-display">
+          <span>◷</span>
+          {{ currentDate }}
+        </div>
+
+        <button class="notification-btn" aria-label="Notifications">
+          ♧
+          <span class="notification-dot"></span>
+        </button>
+
+        <div class="profile">
+          <div class="avatar">{{ ownerName.charAt(0).toUpperCase() }}</div>
+          <div class="profile-details">
+            <strong>{{ ownerName }}</strong>
+            <span>Business Owner</span>
+          </div>
+          <span>⌄</span>
+        </div>
+      </div>
+
+      <button class="logout-btn" (click)="logout()">↪ Logout</button>
+    </header>
+
+    <!-- Dashboard -->
+    <section *ngIf="selectedMenu === 'Dashboard'" class="dashboard-content">
+
+      <div class="welcome-section">
+        <div>
+          <span class="eyebrow">BUSINESS OVERVIEW</span>
+          <h2>Your business at a glance</h2>
+          <p>Monitor your gym performance and manage daily operations.</p>
+        </div>
+
+        <button class="primary-btn" (click)="selectMenu('Members')">
+          + Add New Member
+        </button>
+      </div>
+
+      <div class="dashboard-message" *ngIf="dashboardLoading">
+        <p>Loading your business dashboard...</p>
+      </div>
+
+      <div class="dashboard-error" *ngIf="dashboardError">
+        <p>{{ dashboardError }}</p>
+        <button class="secondary-btn" (click)="loadDashboardData(true)">Retry</button>
+      </div>
+
+      <div class="stats-grid" *ngIf="!dashboardError">
+        <ng-container *ngIf="!dashboardLoading; else dashboardStatSkeletons">
+          <div class="stat-card" *ngFor="let stat of stats">
+            <div class="stat-top">
+              <span>{{ stat.title }}</span>
+              <div class="stat-icon" [ngClass]="stat.color">{{ stat.icon }}</div>
+            </div>
+            <h3>{{ stat.value }}</h3>
+            <div class="stat-bottom">
+              <span>{{ stat.description }}</span>
+            </div>
+          </div>
+        </ng-container>
+        <ng-template #dashboardStatSkeletons>
+          <div class="dashboard-skeleton-stats" role="status" aria-label="Loading dashboard statistics">
+            <div class="stat-card" *ngFor="let placeholder of dashboardStatPlaceholders" aria-hidden="true">
+              <div class="skeleton-line"></div>
+              <div class="skeleton-value"></div>
+              <div class="skeleton-line"></div>
+            </div>
+          </div>
+        </ng-template>
+      </div>
+
+      <section class="collection-section" *ngIf="!dashboardError" aria-label="Payment collections">
+        <div class="collection-heading">
+          <div>
+            <h2>Payment Collections</h2>
+            <p>Successful payments · {{ dashboardTimeZone }}</p>
+          </div>
+        </div>
+        <div class="collection-grid" *ngIf="collections; else collectionSkeletons">
+          <article class="stat-card">
+            <div class="stat-top">
+              <span>Today's Collection</span>
+              <div class="stat-icon blue">₹</div>
+            </div>
+            <h3>{{ formatCurrency(collections.today) }}</h3>
+            <div class="stat-bottom"><span>Successful payments today</span></div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top">
+              <span>This Week's Collection</span>
+              <div class="stat-icon green">▦</div>
+            </div>
+            <h3>{{ formatCurrency(collections.week) }}</h3>
+            <div class="stat-bottom"><span>Monday through today</span></div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-top">
+              <span>This Month's Collection</span>
+              <div class="stat-icon orange">▤</div>
+            </div>
+            <h3>{{ formatCurrency(collections.month) }}</h3>
+            <div class="stat-bottom"><span>Successful payments this month</span></div>
+          </article>
+        </div>
+        <ng-template #collectionSkeletons>
+          <div class="collection-grid">
+            <article class="stat-card collection-skeleton" *ngFor="let placeholder of [0, 1, 2]" aria-hidden="true">
+              <div class="skeleton-line"></div>
+              <div class="skeleton-value"></div>
+              <div class="skeleton-line"></div>
+            </article>
+          </div>
+        </ng-template>
+      </section>
+
+      <div class="analytics-grid" *ngIf="!dashboardError">
+
+        <ng-container *ngIf="!dashboardLoading; else dashboardAnalyticsSkeletons">
+        <div class="panel monthly-revenue-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Monthly Revenue</h3>
+              <p>Successful payments · last 12 months</p>
+            </div>
+          </div>
+
+          <div
+            class="monthly-revenue-chart"
+            *ngIf="collections?.monthlyRevenue?.length && maxMonthlyRevenue > 0; else noMonthlyRevenue"
+            role="img"
+            aria-label="Bar chart showing monthly successful payment revenue for the last 12 months">
+            <div class="bar-chart revenue-chart">
+              <div class="chart-column revenue-chart-column" *ngFor="let point of collections.monthlyRevenue">
+                <span class="revenue-amount" [title]="formatCurrency(point.revenue)">
+                  {{ formatCompactCurrency(point.revenue) }}
+                </span>
+                <div class="bar-track revenue-bar-track">
+                  <div class="bar revenue-bar" [style.height.%]="getRevenueBarHeight(point.revenue)"></div>
+                </div>
+                <span class="revenue-month">{{ point.month }}</span>
+              </div>
+            </div>
+          </div>
+          <ng-template #noMonthlyRevenue>
+            <div class="revenue-empty" *ngIf="collections">
+              No successful payments recorded in the last 12 months.
+            </div>
+            <div class="revenue-empty" *ngIf="!collections">
+              Collection history is unavailable.
+            </div>
+          </ng-template>
+        </div>
+
+        <div class="panel attendance-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Today's Attendance</h3>
+              <p>Member check-in overview</p>
+            </div>
+            <span class="live-badge">● LIVE DATA</span>
+          </div>
+
+          <div class="attendance-number">
+            <h2>{{ todayAttendance }}</h2>
+            <span>Members checked in today</span>
+          </div>
+
+          <div class="attendance-details">
+            <div>
+              <span class="legend green-legend"></span>
+              <span>Checked In Today</span>
+              <strong>{{ todayAttendance }}</strong>
+            </div>
+          </div>
+
+          <button class="secondary-btn" (click)="selectMenu('Attendance')">
+            View Attendance →
+          </button>
+        </div>
+        </ng-container>
+
+        <ng-template #dashboardAnalyticsSkeletons>
+          <div class="panel dashboard-panel-skeleton" role="status" aria-label="Loading membership collection">
+            <div class="skeleton-line skeleton-title"></div>
+            <div class="skeleton-value"></div>
+            <div class="skeleton-card"></div>
+          </div>
+          <div class="panel dashboard-panel-skeleton" role="status" aria-label="Loading attendance summary">
+            <div class="skeleton-line skeleton-title"></div>
+            <div class="skeleton-value"></div>
+            <div class="skeleton-card"></div>
+          </div>
+        </ng-template>
+      </div>
+
+      <app-membership-expiry (memberSelected)="openMemberFromExpiry($event)"></app-membership-expiry>
+
+      <div class="panel members-panel" *ngIf="!dashboardError">
+        <div class="panel-header">
+          <div>
+            <h3>Recent Members</h3>
+            <p>Latest registered members</p>
+          </div>
+          <button class="text-btn" (click)="selectMenu('Members')">
+            View All Members →
+          </button>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>MEMBER</th>
+                <th>MEMBER ID</th>
+                <th>PHONE</th>
+                <th>PLAN</th>
+                <th>JOINING DATE</th>
+                <th>STATUS</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr *ngIf="dashboardLoading">
+                <td colspan="6">
+                  <div class="dashboard-table-skeleton" role="status">Loading recent members...</div>
+                </td>
+              </tr>
+
+              <tr *ngFor="let member of recentMembers" [hidden]="dashboardLoading">
+                <td>
+                  <div class="member-name">
+                    <div class="member-avatar">
+                      {{ member.name.charAt(0).toUpperCase() }}
+                    </div>
+                    <strong>{{ member.name }}</strong>
+                  </div>
+                </td>
+                <td>{{ member.id }}</td>
+                <td>{{ member.phone }}</td>
+                <td>{{ member.plan }}</td>
+                <td>{{ member.joining }}</td>
+                <td>
+                  <span class="status"
+                    [class.status-active]="member.status === 'Active'"
+                    [class.status-expired]="member.status === 'Expired'">
+                    {{ member.status }}
+                  </span>
+                </td>
+              </tr>
+
+              <tr *ngIf="!dashboardLoading && recentMembers.length === 0">
+                <td colspan="6" class="empty-state">
+                  No members registered yet.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <footer class="page-footer">
+        <span>© 2026 SS Builds365. All rights reserved.</span>
+        <span>Built with ❤️ for Fitness Businesses</span>
+      </footer>
+    </section>
+
+    <!-- Members Module: inline dashboard content -->
+    <div [hidden]="selectedMenu !== 'Members'">
+      @defer (when selectedMenu === 'Members') {
+        <app-members [active]="selectedMenu === 'Members'" [focusMember]="memberToFocus"></app-members>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Members loading">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Members. Refresh the page to try again.</p>
+      }
+    </div>
+
+    <!-- Membership Plans Module -->
+    <div [hidden]="selectedMenu !== 'Membership Plans'">
+      @defer (when selectedMenu === 'Membership Plans') {
+        <app-membership-plans [active]="selectedMenu === 'Membership Plans'"></app-membership-plans>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Membership plans loading">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Membership Plans. Refresh the page to try again.</p>
+      }
+    </div>
+
+    <!-- Attendance Module -->
+    <div [hidden]="selectedMenu !== 'Attendance'">
+      @defer (when selectedMenu === 'Attendance') {
+        <app-attendance [active]="selectedMenu === 'Attendance'"></app-attendance>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Attendance loading">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Attendance. Refresh the page to try again.</p>
+      }
+    </div>
+
+    <!-- Payments Module -->
+    <div [hidden]="selectedMenu !== 'Payments & Fees'">
+      @defer (when selectedMenu === 'Payments & Fees') {
+        <app-payments [active]="selectedMenu === 'Payments & Fees'"></app-payments>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Payments loading">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Payments &amp; Fees. Refresh the page to try again.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Trainers & Staff'">
+      @defer (when selectedMenu === 'Trainers & Staff') {
+        <app-trainers-staff></app-trainers-staff>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Team records loading"><div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div></section>
+      } @error {
+        <p class="module-load-error">Unable to load Trainers &amp; Staff.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Expense Tracker'">
+      @defer (when selectedMenu === 'Expense Tracker') {
+        <app-expense-tracker></app-expense-tracker>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Expenses loading">
+          <div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Expense Tracker.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Reports & Analytics'">
+      @defer (when selectedMenu === 'Reports & Analytics') {
+        <app-reports></app-reports>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Reports loading"><div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div></section>
+      } @error {
+        <p class="module-load-error">Unable to load Reports &amp; Analytics.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Settings'">
+      @defer (when selectedMenu === 'Settings') {
+        <app-business-settings
+          (businessUpdated)="businessName = $event"
+          (loggedOut)="logout()"
+          (passwordChanged)="logout('password-changed')">
+        </app-business-settings>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Settings loading"><div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div></section>
+      } @error {
+        <p class="module-load-error">Unable to load Settings.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Subscription'">
+      @defer (when selectedMenu === 'Subscription') {
+        <app-subscription></app-subscription>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Subscription loading"><div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div></section>
+      } @error {
+        <p class="module-load-error">Unable to load Subscription.</p>
+      }
+    </div>
+
+  </main>
+</div>

@@ -1,0 +1,374 @@
+<div class="payments-page">
+
+  <!-- Page Header -->
+  <div class="page-heading">
+    <div>
+      <span class="eyebrow">FINANCIAL MANAGEMENT</span>
+      <h2>Payments & Fees</h2>
+      <p>Manage member payments, collections and transaction history.</p>
+    </div>
+
+    <div class="heading-actions">
+      <button class="secondary-btn" (click)="loadPayments()" [disabled]="loading">
+        ↻ Refresh
+      </button>
+
+      <button class="primary-btn" (click)="openPaymentForm()">
+        + Collect Payment
+      </button>
+    </div>
+  </div>
+
+  <!-- Success Message -->
+  <div class="success-message" *ngIf="successMessage">
+    ✓ {{ successMessage }}
+  </div>
+
+  <!-- Error Message -->
+  <div class="error-message" *ngIf="errorMessage">
+    {{ errorMessage }}
+  </div>
+
+  <div class="error-message" *ngIf="receiptErrorMessage">
+    {{ receiptErrorMessage }}
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="payment-stats">
+
+    <div class="payment-stat-card">
+      <div class="stat-icon collection-icon">₹</div>
+      <div>
+        <span>Membership Collection</span>
+        <h3>{{ paymentSummaryLoaded ? '₹' + (totalCollection | number:'1.0-0') : '—' }}</h3>
+        <small>Paid amounts recorded against memberships</small>
+      </div>
+    </div>
+
+    <div class="payment-stat-card">
+      <div class="stat-icon transaction-icon">▤</div>
+      <div>
+        <span>Total Transactions</span>
+        <h3>{{ paymentSummaryLoaded ? totalTransactions : '—' }}</h3>
+        <small>All payment records</small>
+      </div>
+    </div>
+
+    <div class="payment-stat-card">
+      <div class="stat-icon pending-icon">◷</div>
+      <div>
+        <span>Pending Transactions</span>
+        <h3>{{ paymentSummaryLoaded ? pendingTransactions : '—' }}</h3>
+        <small>Awaiting confirmation</small>
+      </div>
+    </div>
+
+    <div class="payment-stat-card">
+      <div class="stat-icon outstanding-icon">!</div>
+      <div>
+        <span>Outstanding Fees</span>
+        <h3>{{ paymentSummaryLoaded && hasOutstandingSummary ? '₹' + (totalOutstanding | number:'1.2-2') : '—' }}</h3>
+        <small>Unpaid non-cancelled membership balances</small>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Collect Payment Form -->
+  <div class="payment-form-panel" *ngIf="showPaymentForm">
+
+    <div class="form-heading">
+      <div>
+        <span class="eyebrow">NEW TRANSACTION</span>
+        <h3>Collect Member Payment</h3>
+        <p>Enter member and payment details below.</p>
+      </div>
+
+      <button class="close-btn" (click)="closePaymentForm()">×</button>
+    </div>
+
+    <form (ngSubmit)="submitPayment()" #paymentNgForm="ngForm">
+
+      <div class="form-grid">
+
+        <!-- Member -->
+        <div class="form-group">
+          <label>Select Member *</label>
+
+          <select name="memberId" [(ngModel)]="selectedMemberId" (ngModelChange)="onMemberChange()" required>
+
+            <option value="">Choose Member</option>
+
+            <option *ngFor="let member of members" [value]="member._id">
+              {{ member.fullName }} - {{ member.phone }}
+            </option>
+
+          </select>
+
+          <small *ngIf="membersLoading">Loading members...</small>
+          <small *ngIf="!membersLoading && members.length === 0">
+            No active members found.
+          </small>
+        </div>
+
+        <!-- Membership -->
+        <div class="form-group">
+          <label>Select Membership *</label>
+
+          <select name="membershipId" [(ngModel)]="selectedMembershipId" (ngModelChange)="onMembershipChange()"
+            [disabled]="!selectedMemberId || membershipsLoading" required>
+
+            <option value="">Choose Membership</option>
+
+            <option *ngFor="let membership of memberships" [value]="membership._id">
+
+              {{ membership.planId?.planName || 'Membership Plan' }}
+              - {{ membership.status }}
+
+            </option>
+
+          </select>
+
+          <small *ngIf="membershipsLoading">
+            Loading memberships...
+          </small>
+
+          <small *ngIf="selectedMemberId && !membershipsLoading && memberships.length === 0">
+            No membership with pending fees found.
+          </small>
+        </div>
+
+      </div>
+
+      <!-- Membership Summary -->
+      <div class="membership-summary" *ngIf="selectedMembership">
+
+        <div>
+          <span>Total Membership Fees</span>
+          <strong>₹{{ selectedMembership.planPrice | number:'1.2-2' }}</strong>
+        </div>
+
+        <div>
+          <span>Already Paid</span>
+          <strong>₹{{ selectedMembership.paidAmount | number:'1.2-2' }}</strong>
+        </div>
+
+        <div>
+          <span>Pending Amount</span>
+          <strong class="pending-amount">
+            ₹{{ pendingAmount | number:'1.2-2' }}
+          </strong>
+        </div>
+
+      </div>
+      <small *ngIf="selectedMembership?.gstSnapshot?.enabled">
+        Taxable amount: ₹{{ selectedMembership.gstSnapshot.taxableAmount | number:'1.2-2' }}
+        · GST {{ selectedMembership.gstSnapshot.gstPercentage }}%
+        · {{ selectedMembership.gstSnapshot.taxInclusive ? 'Inclusive' : 'Exclusive' }}
+      </small>
+
+      <div class="form-grid">
+
+        <!-- Amount -->
+        <div class="form-group">
+          <label>Payment Amount (₹) *</label>
+
+          <input type="number" name="amount" [(ngModel)]="paymentForm.amount" min="0.01" [max]="pendingAmount"
+            step="0.01" placeholder="Enter payment amount" required>
+        </div>
+
+        <!-- Payment Method -->
+        <div class="form-group">
+          <label>Payment Method *</label>
+
+          <select name="paymentMethod" [(ngModel)]="paymentForm.paymentMethod" required>
+
+            <option value="Cash">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="Card">Card</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Razorpay">Razorpay</option>
+
+          </select>
+        </div>
+
+        <!-- Payment Type -->
+        <div class="form-group">
+          <label>Payment Type</label>
+
+          <select name="paymentType" [(ngModel)]="paymentForm.paymentType">
+
+            <option value="Membership Fee">Membership Fee</option>
+            <option value="Registration Fee">Registration Fee</option>
+            <option value="Other">Other</option>
+
+          </select>
+        </div>
+
+        <!-- Date -->
+        <div class="form-group">
+          <label>Payment Date *</label>
+
+          <input type="date" name="paymentDate" [(ngModel)]="paymentForm.paymentDate" required>
+        </div>
+
+        <!-- Transaction ID -->
+        <div class="form-group">
+          <label>Transaction ID</label>
+
+          <input type="text" name="transactionId" [(ngModel)]="paymentForm.transactionId"
+            placeholder="Optional transaction reference">
+        </div>
+
+        <div class="form-group" *ngIf="selectedMembership?.gstSnapshot?.enabled">
+          <label>Place of Supply State *</label>
+          <select name="placeOfSupplyStateCode" [(ngModel)]="paymentForm.placeOfSupplyStateCode"
+            [disabled]="!!selectedMembership.placeOfSupplyStateCode" required>
+            <option value="">Select state</option>
+            <option *ngFor="let state of gstStates" [value]="state.code">
+              {{ state.name }} ({{ state.code }})
+            </option>
+          </select>
+          <small *ngIf="selectedMembership.placeOfSupplyStateCode">
+            State is locked to the original tax invoice.
+          </small>
+        </div>
+
+        <!-- Notes -->
+        <div class="form-group">
+          <label>Notes</label>
+
+          <input type="text" name="notes" [(ngModel)]="paymentForm.notes" placeholder="Enter payment notes">
+        </div>
+
+      </div>
+
+      <!-- Form Actions -->
+      <div class="form-actions">
+
+        <button type="button" class="secondary-btn" (click)="closePaymentForm()">
+          Cancel
+        </button>
+
+        <button type="submit" class="primary-btn" [disabled]="savingPayment || !selectedMembership">
+
+          {{ savingPayment ? 'Saving Payment...' : '✓ Collect Payment' }}
+
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+  <!-- Payment History -->
+  <div class="payment-panel">
+
+    <div class="panel-heading">
+      <div>
+        <h3>Payment History</h3>
+        <p>All transactions recorded for your business.</p>
+        <small *ngIf="loading && payments.length > 0">Updating payment records...</small>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="loading-state" *ngIf="loading && payments.length === 0">
+      <p>Loading payment records...</p>
+    </div>
+
+    <!-- Error -->
+    <div class="error-state" *ngIf="errorMessage && !loading">
+      <p>{{ errorMessage }}</p>
+      <button class="secondary-btn" (click)="loadPayments()">Retry</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrapper" *ngIf="!errorMessage">
+
+      <table>
+        <thead>
+          <tr>
+            <th>RECEIPT NO.</th>
+            <th>MEMBER</th>
+            <th>PHONE</th>
+            <th>AMOUNT</th>
+            <th>METHOD</th>
+            <th>DATE</th>
+            <th>STATUS</th>
+            <th>ACTION</th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          <tr *ngFor="let payment of payments">
+
+            <td>{{ payment.receiptNumber || '-' }}</td>
+
+            <td>
+              <strong>
+                {{ payment.memberId?.fullName || 'Member unavailable' }}
+              </strong>
+            </td>
+
+            <td>{{ payment.memberId?.phone || '-' }}</td>
+
+            <td class="amount-cell">
+              ₹{{ payment.amount | number:'1.2-2' }}
+            </td>
+
+            <td>{{ payment.paymentMethod }}</td>
+
+            <td>{{ formatDate(payment.paymentDate) }}</td>
+
+            <td>
+              <span class="payment-status" [class.success]="payment.status === 'Success'"
+                [class.pending]="payment.status === 'Pending'" [class.failed]="payment.status === 'Failed'"
+                [class.refunded]="payment.status === 'Refunded'">
+                {{ payment.status }}
+              </span>
+            </td>
+
+            <td>
+              <div class="receipt-actions">
+                <button class="receipt-btn" [disabled]="!['Success', 'Refunded'].includes(payment.status) || receiptLoadingId === payment._id"
+                  (click)="viewReceipt(payment)">
+                  {{ receiptLoadingId === payment._id ? 'Loading…' : 'View' }}
+                </button>
+                <button class="receipt-btn" [disabled]="!['Success', 'Refunded'].includes(payment.status) || receiptLoadingId === payment._id"
+                  (click)="generateReceipt(payment)">Generate Receipt</button>
+                <button class="receipt-btn secondary-receipt-btn" [disabled]="!['Success', 'Refunded'].includes(payment.status) || receiptLoadingId === payment._id"
+                  (click)="printVerifiedReceipt(payment)">Print</button>
+              </div>
+            </td>
+
+          </tr>
+
+          <tr *ngIf="!loading && payments.length === 0">
+            <td colspan="8" class="empty-state">
+              <div class="empty-icon">₹</div>
+              <strong>No payment records found</strong>
+              <p>Collect your first member payment to see it here.</p>
+            </td>
+          </tr>
+
+        </tbody>
+      </table>
+
+    </div>
+
+    <div class="payment-pagination" *ngIf="!errorMessage && totalPages > 1">
+      <span>Page {{ currentPage }} of {{ totalPages }} ({{ totalPayments }} payments)</span>
+      <div>
+        <button class="secondary-btn" [disabled]="currentPage === 1 || loading"
+          (click)="changePage(currentPage - 1)">Previous</button>
+        <button class="secondary-btn" [disabled]="currentPage >= totalPages || loading"
+          (click)="changePage(currentPage + 1)">Next</button>
+      </div>
+    </div>
+
+  </div>
+
+</div>

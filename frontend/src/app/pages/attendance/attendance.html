@@ -1,0 +1,310 @@
+
+<div class="attendance-page">
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1>Attendance Management</h1>
+      <p>Track and manage your members' daily attendance.</p>
+    </div>
+
+    <div class="date-filter">
+      <label>Select Date</label>
+      <input
+        type="date"
+        [(ngModel)]="selectedDate"
+        (change)="onDateChange()"
+      />
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="message success" *ngIf="successMessage">
+    {{ successMessage }}
+  </div>
+
+  <div class="message error" *ngIf="errorMessage">
+    {{ errorMessage }}
+  </div>
+
+  <div class="message error" *ngIf="exportErrorMessage">
+    {{ exportErrorMessage }}
+  </div>
+
+  <!-- Check-in Section -->
+  <div class="checkin-card">
+
+    <div class="checkin-info">
+      <h2>Mark Member Attendance</h2>
+      <p>Select a member or scan their QR code.</p>
+    </div>
+
+    <div class="checkin-form">
+
+      <select
+        [(ngModel)]="selectedMemberId"
+        [disabled]="loadingMembers || processing"
+      >
+        <option value="">Select Member</option>
+
+        <option
+          *ngFor="let member of members"
+          [value]="member._id"
+        >
+          {{ member.fullName }} - {{ member.phone }}
+        </option>
+      </select>
+
+      <button
+        class="checkin-btn"
+        (click)="markCheckIn()"
+        [disabled]="processing || loadingMembers"
+      >
+        {{ processing ? 'Processing...' : 'Check In' }}
+      </button>
+
+      <button
+        type="button"
+        class="qr-scan-btn"
+        (click)="openQRScanner()"
+        [disabled]="qrProcessing"
+      >
+        <span>▦</span> Scan Member QR
+      </button>
+
+    </div>
+  </div>
+
+  <!-- QR Scanner Modal -->
+  <div class="qr-scanner-overlay" *ngIf="qrScannerOpen">
+
+    <div class="qr-scanner-modal">
+
+      <button
+        type="button"
+        class="qr-close-btn"
+        (click)="closeQRScanner()"
+      >
+        &times;
+      </button>
+
+      <h2>Member QR Scanner</h2>
+      <p>Position the member QR code inside the camera frame.</p>
+
+      <div class="qr-camera-container">
+
+        <video
+          #qrVideo
+          autoplay
+          muted
+          playsinline
+        ></video>
+
+      </div>
+
+      <div class="scanner-status" *ngIf="qrScanning">
+        Camera active. Scan the member QR code.
+      </div>
+
+      <div class="scanner-status" *ngIf="qrProcessing">
+        Verifying QR code and marking attendance...
+      </div>
+
+      <div class="scanner-error" *ngIf="errorMessage">
+        {{ errorMessage }}
+      </div>
+
+      <div class="scanner-actions">
+
+        <button
+          type="button"
+          class="start-scanner-btn"
+          *ngIf="!qrScanning && !qrProcessing"
+          (click)="startQRScanner()"
+        >
+          Start Camera
+        </button>
+
+        <button
+          type="button"
+          class="stop-scanner-btn"
+          *ngIf="qrScanning"
+          (click)="stopQRScanner()"
+        >
+          Stop Camera
+        </button>
+
+        <button
+          type="button"
+          class="cancel-scanner-btn"
+          (click)="closeQRScanner()"
+        >
+          Close
+        </button>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Attendance Summary -->
+  <div class="summary-card">
+
+    <div>
+      <span>Total Present</span>
+      <h2>{{ attendanceLoaded ? attendanceList.length : '—' }}</h2>
+    </div>
+
+    <div>
+      <span>Currently Checked In</span>
+      <h2>{{ attendanceLoaded ? checkedInCount : '—' }}</h2>
+    </div>
+
+    <div>
+      <span>Checked Out</span>
+      <h2>
+        {{
+          attendanceLoaded ? attendanceList.length - checkedInCount : '—'
+        }}
+      </h2>
+    </div>
+
+  </div>
+
+  <!-- Attendance Table -->
+  <div class="attendance-table-card">
+
+    <div class="table-header">
+
+      <div>
+        <h2>Daily Attendance</h2>
+        <p>Attendance records for selected date.</p>
+      </div>
+
+      <div class="attendance-table-actions">
+        <details class="attendance-export-menu">
+          <summary class="attendance-export-btn">
+            {{ exportLoading ? 'Preparing...' : 'Export' }} ▾
+          </summary>
+          <div class="attendance-export-options">
+            <button type="button" (click)="exportPdf()" [disabled]="exportLoading">PDF Download</button>
+            <button type="button" (click)="exportExcel()" [disabled]="exportLoading">Excel Download</button>
+            <button type="button" (click)="exportCsv()" [disabled]="exportLoading">CSV Download</button>
+            <button type="button" (click)="printReport()" [disabled]="exportLoading">Print Report</button>
+          </div>
+        </details>
+
+        <button
+          class="refresh-btn"
+          (click)="loadDailyAttendance()"
+        >
+          Refresh
+        </button>
+      </div>
+
+    </div>
+
+    <div
+      class="empty-state"
+      *ngIf="!loadingAttendance && attendanceList.length === 0"
+    >
+      <h3>No Attendance Found</h3>
+      <p>No attendance records available for this date.</p>
+    </div>
+
+    <div
+      class="table-responsive"
+      *ngIf="loadingAttendance || attendanceList.length > 0"
+    >
+
+      <table>
+
+        <thead>
+          <tr>
+            <th>Member Name</th>
+            <th>Phone</th>
+            <th>Check-in</th>
+            <th>Check-out</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          <tr *ngIf="loadingAttendance">
+            <td colspan="7" class="loading">Loading attendance records...</td>
+          </tr>
+
+          <tr *ngFor="let record of attendanceList">
+
+            <td>
+              <strong>
+                {{ record.memberId?.fullName || 'Unknown Member' }}
+              </strong>
+            </td>
+
+            <td>
+              {{ record.memberId?.phone || '-' }}
+            </td>
+
+            <td>
+              {{ record.checkIn | date:'shortTime' }}
+            </td>
+
+            <td>
+              {{
+                record.checkOut
+                  ? (record.checkOut | date:'shortTime')
+                  : 'Not Checked Out'
+              }}
+            </td>
+
+            <td>
+              <span class="type-badge">
+                {{ record.attendanceType }}
+              </span>
+            </td>
+
+            <td>
+              <span
+                class="status-badge"
+                [class.present]="record.status === 'Present'"
+                [class.late]="record.status === 'Late'"
+              >
+                {{ record.status }}
+              </span>
+            </td>
+
+            <td>
+
+              <button
+                *ngIf="!record.checkOut"
+                class="checkout-btn"
+                (click)="markCheckOut(record.memberId?._id)"
+                [disabled]="processing"
+              >
+                Check Out
+              </button>
+
+              <span
+                class="completed-text"
+                *ngIf="record.checkOut"
+              >
+                Completed
+              </span>
+
+            </td>
+
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+</div>

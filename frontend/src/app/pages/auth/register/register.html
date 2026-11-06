@@ -1,0 +1,101 @@
+<div class="auth-page">
+
+  <div class="auth-brand">
+    <div class="brand-logo">SS</div>
+    <h1>SS FITNESS <span>MANAGER</span></h1>
+    <p>Manage your fitness business smarter.</p>
+
+    <div class="brand-message">
+      <h2>Your Business.<br>One Smart Platform.</h2>
+      <p>
+        Manage members, attendance, fees, trainers
+        and your complete fitness business from one place.
+      </p>
+    </div>
+  </div>
+
+  <div class="auth-form-section">
+
+    <div class="form-container">
+
+      <div class="form-heading">
+        <span class="eyebrow">GET STARTED</span>
+        <h2>Create your account</h2>
+        <p>Register your business and start managing it.</p>
+      </div>
+
+      <div class="error-message" *ngIf="errorMessage">
+        {{ errorMessage }}
+      </div>
+
+      <form [formGroup]="registerForm" (ngSubmit)="onSubmit()">
+
+        <div class="form-grid">
+
+          <div class="form-group">
+            <label>Owner Name *</label>
+            <input type="text" formControlName="name"
+              placeholder="Enter your full name">
+          </div>
+
+          <div class="form-group">
+            <label>Email Address *</label>
+            <input type="email" formControlName="email"
+              placeholder="Enter email address">
+          </div>
+
+          <div class="form-group">
+            <label>Mobile Number *</label>
+            <input type="tel" maxlength="10" formControlName="phone"
+              placeholder="10 digit mobile number">
+          </div>
+
+          <div class="form-group">
+            <label>Password *</label>
+            <input type="password" formControlName="password"
+              placeholder="Minimum 8 characters">
+          </div>
+
+          <div class="form-group full-width">
+            <label>Business Name *</label>
+            <input type="text" formControlName="businessName"
+              placeholder="Example: SS Fitness Gym">
+          </div>
+
+          <div class="form-group full-width">
+            <label>Business Type *</label>
+            <select formControlName="businessType">
+              <option *ngFor="let type of businessTypes" [value]="type">
+                {{ type }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group full-width">
+            <label>Business Address</label>
+            <textarea formControlName="address"
+              placeholder="Enter your business address"></textarea>
+          </div>
+
+        </div>
+
+        <button type="submit" [disabled]="loading">
+          {{ loading ? 'Creating Account...' : 'Create Account' }}
+        </button>
+
+      </form>
+
+      <p class="login-link">
+        Already have an account?
+        <a routerLink="/login">Login here</a>
+      </p>
+
+      <p class="terms">
+        By creating an account, you agree to our Terms & Privacy Policy.
+      </p>
+
+    </div>
+
+  </div>
+
+</div>

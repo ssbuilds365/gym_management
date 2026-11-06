@@ -1,0 +1,64 @@
+.settings-page { padding: 24px; color: #202124; }
+header { margin-bottom: 22px; }
+h2 { margin: 8px 0; }
+header p { color: #777; }
+.eyebrow { color: #e53935; font-size: 11px; font-weight: 800; letter-spacing: 1.4px; }
+.settings-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; background: #fff; border: 1px solid #eee; border-radius: 11px; padding: 24px; max-width: 850px; }
+label { display: grid; gap: 7px; font-size: 12px; color: #555; }
+input, select, textarea { width: 100%; padding: 11px; border: 1px solid #ddd; border-radius: 7px; font: inherit; }
+.wide { grid-column: 1 / -1; }
+.primary-btn { justify-self: start; border: 0; border-radius: 7px; background: #e53935; color: #fff; padding: 11px 16px; cursor: pointer; }
+.success { color: #16794b; }
+.error { color: #b42318; }
+@media (max-width: 650px) { .settings-panel { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+.gst-settings { border-top: 1px solid #eee; padding-top: 20px; }
+.gst-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.gst-heading h3 { margin: 0 0 5px; font-size: 16px; }
+.gst-heading p, .gst-disclaimer, .gst-note { color: #777; font-size: 12px; }
+.gst-toggle { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.gst-toggle input { width: auto; accent-color: #e53935; }
+.gst-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.gst-grid.disabled { opacity: .7; }
+.gst-note { margin: 0; line-height: 1.5; }
+@media (max-width: 650px) { .gst-heading { align-items: flex-start; flex-direction: column; } .gst-grid { grid-template-columns: 1fr; } .gst-note { grid-column: auto; } }
+
+.security-panel { max-width: 850px; margin-top: 24px; padding: 24px; border: 1px solid #e8eaf0; border-radius: 12px; background: #fff; }
+.security-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.security-heading h3 { margin: 8px 0; color: #202333; }
+.security-heading p { max-width: 560px; margin: 0; color: #73798a; font-size: 13px; line-height: 1.5; }
+.secondary-btn, .revoke-session-btn, .danger-btn { border: 1px solid #dfe2eb; border-radius: 8px; background: #fff; color: #34394a; padding: 10px 13px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.secondary-btn:disabled, .revoke-session-btn:disabled, .danger-btn:disabled { opacity: .55; cursor: not-allowed; }
+.session-list { display: grid; gap: 10px; margin-top: 18px; }
+.session-item { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px; border: 1px solid #eceef3; border-radius: 10px; }
+.session-device { display: flex; align-items: flex-start; gap: 12px; }
+.session-device > div { display: grid; gap: 5px; }
+.session-device strong { color: #252a3b; font-size: 13px; }
+.session-device small { color: #777e8e; font-size: 11px; }
+.device-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; background: #f0efff; color: #5b52c8; }
+.current-session { margin-left: 6px; border-radius: 20px; padding: 3px 7px; background: #e8f7ef; color: #16794b; font-size: 10px; white-space: nowrap; }
+.security-actions { display: flex; gap: 10px; margin-top: 18px; }
+.danger-btn { border-color: #f0cbcb; color: #a4262c; }
+.empty-sessions { color: #6f7585; font-size: 13px; }
+.password-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; max-width: 720px; margin: 20px 0 28px; }
+.password-input { position: relative; display: flex; align-items: center; }
+.password-input input { padding-right: 66px; }
+.password-visibility { position: absolute; right: 8px; border: 0; background: transparent; color: #5552bd; font-size: 12px; font-weight: 700; cursor: pointer; }
+.password-strength { grid-column: 1 / -1; display: grid; gap: 6px; }
+.strength-heading { display: flex; justify-content: space-between; color: #555; font-size: 12px; }
+.strength-heading strong { color: #5552bd; }
+.password-strength meter { width: 100%; height: 9px; }
+.password-strength small { color: #73798a; font-size: 11px; }
+.password-actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; }
+.password-actions .primary-btn:disabled { opacity: .6; cursor: not-allowed; }
+.password-actions .secondary-btn { padding: 11px 16px; }
+@media (max-width: 650px) {
+  .security-panel { padding: 18px; }
+  .security-heading { flex-direction: column; }
+  .session-item { align-items: flex-start; }
+  .security-actions { flex-direction: column; }
+  .security-actions button { width: 100%; }
+  .password-form { grid-template-columns: 1fr; }
+  .password-strength, .password-actions { grid-column: auto; }
+  .password-actions { flex-direction: column; align-items: stretch; }
+  .password-actions button { width: 100%; }
+}

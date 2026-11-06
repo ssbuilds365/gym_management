@@ -1,0 +1,248 @@
+<div class="plans-page">
+
+  <!-- PAGE HEADER -->
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">MANAGEMENT</span>
+      <h1>Membership Plans</h1>
+      <p>Create and manage your gym membership packages.</p>
+    </div>
+
+    <button class="primary-btn" (click)="openAddForm()">
+      <span>+</span> Add New Plan
+    </button>
+  </div>
+
+  <!-- SUMMARY CARDS -->
+  <div class="stats-grid">
+
+    <div class="stat-card">
+      <div class="stat-icon">▦</div>
+      <div>
+        <span>Total Plans</span>
+        <h2>{{ loading ? '—' : plans.length }}</h2>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon green">✓</div>
+      <div>
+        <span>Active Plans</span>
+        <h2>{{ loading ? '—' : activePlans }}</h2>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon orange">Ⅱ</div>
+      <div>
+        <span>Inactive Plans</span>
+        <h2>{{ loading ? '—' : inactivePlans }}</h2>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- FILTER SECTION -->
+  <div class="filter-section">
+
+    <div class="search-box">
+      <span>⌕</span>
+      <input
+        type="text"
+        placeholder="Search membership plans..."
+        [(ngModel)]="searchText"
+        (input)="filterPlans()">
+    </div>
+
+    <select [(ngModel)]="statusFilter" (change)="filterPlans()">
+      <option value="">All Status</option>
+      <option value="Active">Active</option>
+      <option value="Inactive">Inactive</option>
+    </select>
+
+  </div>
+
+  <!-- LOADING -->
+  <div class="loading-state" *ngIf="loading">
+    Loading membership plans...
+  </div>
+
+  <!-- PLANS GRID -->
+  <div class="plans-grid">
+
+    <div class="plan-card" *ngFor="let plan of filteredPlans">
+
+      <div class="plan-top">
+        <span class="plan-label">MEMBERSHIP</span>
+
+        <span
+          class="status-badge"
+          [class.active]="plan.status === 'Active'"
+          [class.inactive]="plan.status === 'Inactive'">
+          {{ plan.status }}
+        </span>
+      </div>
+
+      <h3>{{ plan.planName }}</h3>
+
+      <div class="plan-price">
+        <span class="currency">₹</span>{{ plan.price }}
+      </div>
+
+      <div class="duration">
+        {{ plan.duration }} {{ plan.durationType }}
+      </div>
+
+      <p class="plan-description">
+        {{ plan.description || 'No description added.' }}
+      </p>
+
+      <div class="benefits-section">
+        <h4>Plan Benefits</h4>
+
+        <div class="benefit" *ngFor="let benefit of plan.benefits">
+          <span>✓</span>
+          {{ benefit }}
+        </div>
+
+        <p *ngIf="!plan.benefits?.length" class="no-benefits">
+          No benefits added.
+        </p>
+      </div>
+
+      <div class="card-actions">
+        <button class="edit-btn" (click)="openEditForm(plan)">
+          Edit Plan
+        </button>
+
+        <button class="delete-btn" (click)="deletePlan(plan)" [disabled]="!!deletingPlanId">
+          Delete
+        </button>
+      </div>
+
+    </div>
+
+    <!-- EMPTY STATE -->
+    <div class="empty-state" *ngIf="!loading && filteredPlans.length === 0">
+      <div class="empty-icon">▦</div>
+      <h3>No Membership Plans Found</h3>
+      <p>Create your first membership plan to get started.</p>
+      <button class="primary-btn" (click)="openAddForm()">
+        + Create Plan
+      </button>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ADD / EDIT MODAL -->
+<div class="modal-overlay" *ngIf="showForm" (click)="closeForm()">
+
+  <div class="plan-modal" (click)="$event.stopPropagation()">
+
+    <div class="modal-header">
+      <div>
+        <span class="eyebrow">PLAN CONFIGURATION</span>
+        <h2>{{ isEditMode ? 'Edit Membership Plan' : 'Create Membership Plan' }}</h2>
+      </div>
+
+      <button class="close-btn" (click)="closeForm()">×</button>
+    </div>
+
+    <div class="form-content">
+
+      <div class="form-group">
+        <label>Plan Name *</label>
+        <input
+          type="text"
+          [(ngModel)]="planForm.planName"
+          placeholder="e.g. Monthly Membership">
+      </div>
+
+      <div class="form-row">
+
+        <div class="form-group">
+          <label>Duration *</label>
+          <input
+            type="number"
+            min="1"
+            [(ngModel)]="planForm.duration"
+            placeholder="1">
+        </div>
+
+        <div class="form-group">
+          <label>Duration Type</label>
+          <select [(ngModel)]="planForm.durationType">
+            <option value="Days">Days</option>
+            <option value="Months">Months</option>
+            <option value="Years">Years</option>
+          </select>
+        </div>
+
+      </div>
+
+      <div class="form-group">
+        <label>Plan Price (₹) *</label>
+        <input
+          type="number"
+          min="0"
+          [(ngModel)]="planForm.price"
+          placeholder="1000">
+      </div>
+
+      <div class="form-group">
+        <label>Description</label>
+        <textarea
+          rows="3"
+          [(ngModel)]="planForm.description"
+          placeholder="Enter plan description...">
+        </textarea>
+      </div>
+
+      <div class="benefits-form">
+
+        <div class="benefits-heading">
+          <label>Plan Benefits</label>
+          <button type="button" class="add-benefit-btn" (click)="addBenefit()">
+            + Add Benefit
+          </button>
+        </div>
+
+        <div class="benefit-input-row" *ngFor="let benefit of planForm.benefits; let i = index">
+          <input
+            type="text"
+            [(ngModel)]="planForm.benefits[i]"
+            placeholder="Enter benefit">
+
+          <button
+            type="button"
+            class="remove-benefit-btn"
+            (click)="removeBenefit(i)">
+            ×
+          </button>
+        </div>
+
+      </div>
+
+      <div class="form-group" *ngIf="isEditMode">
+        <label>Plan Status</label>
+        <select [(ngModel)]="planForm.status">
+          <option value="Active">Active</option>
+          <option value="Inactive">Inactive</option>
+        </select>
+      </div>
+
+    </div>
+
+    <div class="modal-footer">
+      <button class="cancel-btn" (click)="closeForm()">Cancel</button>
+
+      <button class="primary-btn" (click)="savePlan()" [disabled]="saving">
+        {{ saving ? 'Saving...' : isEditMode ? 'Update Plan' : 'Create Plan' }}
+      </button>
+    </div>
+
+  </div>
+
+</div>

@@ -1,0 +1,150 @@
+<section class="panel expiry-panel" aria-label="Membership expiring soon">
+  <header class="expiry-heading">
+    <div>
+      <span class="eyebrow">MEMBERSHIP HEALTH</span>
+      <h3>Membership Expiring Soon</h3>
+      <p *ngIf="timeZone">Dates use {{ timeZone }}</p>
+    </div>
+    <button class="text-btn" type="button" *ngIf="!showAll" (click)="openAll()">
+      View All →
+    </button>
+    <button class="text-btn" type="button" *ngIf="showAll" (click)="closeAll()">
+      ← Dashboard
+    </button>
+  </header>
+
+  <div class="expiry-counts" *ngIf="!errorMessage">
+    <article>
+      <span>Expiring in Next 7 Days</span>
+      <strong>{{ loading && !todayDate ? '—' : expiringNext7DaysCount }}</strong>
+    </article>
+    <article>
+      <span>Expiring Today</span>
+      <strong>{{ loading && !todayDate ? '—' : expiringTodayCount }}</strong>
+    </article>
+    <article>
+      <span>Already Expired</span>
+      <strong>{{ loading && !todayDate ? '—' : expiredCount }}</strong>
+    </article>
+  </div>
+
+  <p class="expiry-feedback success" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+  <div class="expiry-feedback error" *ngIf="errorMessage" role="alert">
+    <span>{{ errorMessage }}</span>
+    <button type="button" (click)="loadExpiry()">Retry</button>
+  </div>
+
+  <div class="expiry-skeleton" *ngIf="loading && !errorMessage" role="status" aria-label="Loading memberships">
+    <div></div><div></div><div></div>
+  </div>
+
+  <ng-container *ngIf="showAll && !loading && !errorMessage">
+    <div class="expiry-filters">
+      <label>Search member
+        <input type="search" [(ngModel)]="search" (ngModelChange)="onSearchChange()"
+          placeholder="Name or phone">
+      </label>
+      <label>Expiry status
+        <select [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
+          <option value="all">All expiry statuses</option>
+          <option value="expiringSoon">Expiring Soon</option>
+          <option value="today">Expires Today</option>
+          <option value="expired">Expired</option>
+        </select>
+      </label>
+      <label>Membership plan
+        <select [(ngModel)]="planFilter" (ngModelChange)="onFilterChange()">
+          <option value="">All plans</option>
+          <option *ngFor="let plan of plans" [value]="plan._id">{{ plan.planName }}</option>
+        </select>
+      </label>
+      <label>Sort by expiry
+        <select [(ngModel)]="sortDirection" (ngModelChange)="onFilterChange()">
+          <option value="asc">Soonest first</option>
+          <option value="desc">Latest first</option>
+        </select>
+      </label>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="!loading && !errorMessage">
+    <div class="expiry-list" *ngIf="showAll ? members.length : upcomingMembers.length; else noExpiries">
+      <article class="expiry-row" *ngFor="let member of (showAll ? members : upcomingMembers)">
+        <div class="member-avatar">{{ member.fullName.charAt(0).toUpperCase() }}</div>
+        <div class="member-details">
+          <button type="button" class="member-link" (click)="openMember(member)">{{ member.fullName }}</button>
+          <span>{{ member.phone }} <span class="separator">·</span> {{ member.planName }}</span>
+        </div>
+        <div class="expiry-date">
+          <strong>{{ formatDate(member.endDateLocal) }}</strong>
+          <span>{{ remainingLabel(member) }}</span>
+        </div>
+        <span class="status-badge" [ngClass]="member.status">{{ statusLabel(member.status) }}</span>
+        <div class="row-actions">
+          <button type="button" class="renew-btn" (click)="openRenewal(member)">Renew</button>
+          <button type="button" class="contact-btn" *ngIf="whatsappUrl(member)"
+            (click)="contactMember(member)" aria-label="Open WhatsApp reminder">
+            WhatsApp
+          </button>
+        </div>
+      </article>
+    </div>
+    <ng-template #noExpiries>
+      <div class="expiry-empty">
+        <strong>{{ showAll ? 'No memberships match these filters.' : 'No memberships expiring in the next 7 days.' }}</strong>
+        <span>{{ showAll ? 'Try another search or expiry filter.' : 'Upcoming renewals will appear here.' }}</span>
+      </div>
+    </ng-template>
+  </ng-container>
+
+  <footer class="expiry-pagination" *ngIf="showAll && totalPages > 0">
+    <span>{{ total }} matching memberships · Page {{ page }} of {{ totalPages }}</span>
+    <div>
+      <button type="button" [disabled]="page <= 1 || loading" (click)="changePage(-1)">Previous</button>
+      <button type="button" [disabled]="page >= totalPages || loading" (click)="changePage(1)">Next</button>
+    </div>
+  </footer>
+</section>
+
+<div class="renewal-overlay" *ngIf="showRenewal" (click)="closeRenewal()">
+  <section class="renewal-modal" role="dialog" aria-modal="true" aria-labelledby="renewal-title"
+    (click)="$event.stopPropagation()">
+    <header>
+      <div>
+        <span class="eyebrow">MEMBERSHIP RENEWAL</span>
+        <h3 id="renewal-title">Renew Membership</h3>
+        <p *ngIf="selectedMember">{{ selectedMember.fullName }} · {{ selectedMember.phone }}</p>
+      </div>
+      <button type="button" class="close-btn" (click)="closeRenewal()" [disabled]="renewalLoading">×</button>
+    </header>
+    <p class="expiry-feedback error" *ngIf="renewalError" role="alert">{{ renewalError }}</p>
+    <p *ngIf="plansLoading">Loading active membership plans…</p>
+    <p *ngIf="!plansLoading && renewalPlans.length === 0" class="renewal-note">
+      No active membership plans are available. Create or activate a plan before renewing.
+    </p>
+    <ng-container *ngIf="!plansLoading">
+      <label>Membership plan
+        <select [(ngModel)]="selectedPlanId" [disabled]="renewalLoading" required>
+          <option value="">Select a plan</option>
+          <option *ngFor="let plan of renewalPlans" [value]="plan._id">
+            {{ plan.planName }} · {{ plan.duration }} {{ plan.durationType }} · ₹{{ plan.price }}
+          </option>
+        </select>
+      </label>
+      <label>New membership start date
+        <input type="date" [(ngModel)]="renewalStartDate" [disabled]="renewalLoading" required>
+      </label>
+      <small *ngIf="selectedMember && selectedMember.remainingDays >= 0">
+        The suggested start date follows the current membership period.
+      </small>
+      <p class="renewal-note">Renewal creates a pending membership. Record and verify payments separately in Payments &amp; Fees.</p>
+    </ng-container>
+    <footer>
+      <button type="button" class="cancel-btn" (click)="closeRenewal()" [disabled]="renewalLoading">Cancel</button>
+      <button type="button" class="renew-btn" (click)="renewMembership()"
+        [disabled]="renewalLoading || plansLoading || !selectedPlanId || !renewalStartDate">
+        {{ renewalLoading ? 'Renewing…' : 'Renew Membership' }}
+      </button>
+    </footer>
+  </section>
+</div>

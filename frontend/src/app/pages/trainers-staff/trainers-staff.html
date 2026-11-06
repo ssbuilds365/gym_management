@@ -1,0 +1,258 @@
+<section class="management-page">
+  <header class="page-heading">
+    <div>
+      <span class="eyebrow">TEAM MANAGEMENT</span>
+      <h2>Trainers &amp; Staff</h2>
+      <p>Manage trainer assignments and business staff.</p>
+    </div>
+    <button class="secondary-btn" type="button" (click)="load()" [disabled]="loading">Refresh</button>
+  </header>
+
+  <div class="summary-grid">
+    <article class="summary-card"><span>Total Trainers</span><strong>{{ trainerTotal }}</strong></article>
+    <article class="summary-card"><span>Active Trainers</span><strong>{{ activeTrainerTotal }}</strong></article>
+    <article class="summary-card"><span>Total Staff</span><strong>{{ staffTotal }}</strong></article>
+    <article class="summary-card"><span>Active Staff</span><strong>{{ activeStaffTotal }}</strong></article>
+  </div>
+
+  <p class="success-message" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+  <p class="error-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
+
+  <section class="section-panel">
+    <div class="section-heading">
+      <div><span class="eyebrow">SECTION 1</span><h3>Trainers Management</h3></div>
+      <button class="primary-btn" type="button" (click)="toggleForm('Trainer')">
+        {{ showTrainerForm ? 'Close Trainer Form' : '+ Add Trainer' }}
+      </button>
+    </div>
+
+    <form class="form-panel" *ngIf="showTrainerForm" (ngSubmit)="save('Trainer')">
+      <h4>{{ editingTrainerId ? 'Edit Trainer' : 'Add Trainer' }}</h4>
+      <div class="form-grid">
+        <label>Full Name *<input name="trainerName" [(ngModel)]="trainerForm.name" maxlength="120" required></label>
+        <label>Phone Number *<input name="trainerPhone" [(ngModel)]="trainerForm.phone" type="tel" maxlength="30" required></label>
+        <label>Email<input name="trainerEmail" [(ngModel)]="trainerForm.email" type="email"></label>
+        <label>Specialization<input name="trainerSpecialization" [(ngModel)]="trainerForm.specialization" maxlength="120"></label>
+        <label>Joining Date *<input name="trainerJoiningDate" [(ngModel)]="trainerForm.joiningDate" type="date" required></label>
+        <label>Salary / Commission<input name="trainerSalary" [(ngModel)]="trainerForm.salaryAmount" type="number" min="0" step="0.01"></label>
+        <label>Compensation Type
+          <select name="trainerCompensation" [(ngModel)]="trainerForm.compensationType">
+            <option value="Salary">Salary</option><option value="Commission">Commission</option>
+          </select>
+        </label>
+        <label>Status
+          <select name="trainerStatus" [(ngModel)]="trainerForm.status">
+            <option value="Active">Active</option><option value="Inactive">Inactive</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="primary-btn" [disabled]="savingRole !== ''">{{ savingRole ? 'Saving…' : (editingTrainerId ? 'Save Changes' : 'Add Trainer') }}</button>
+        <button class="secondary-btn" type="button" *ngIf="editingTrainerId" (click)="cancelEdit('Trainer')">Cancel</button>
+      </div>
+    </form>
+
+    <div class="directory-tools">
+      <input aria-label="Search trainers" placeholder="Search trainers…" [(ngModel)]="trainerSearch" (ngModelChange)="onDirectorySearchInput('Trainer')">
+      <select aria-label="Filter trainers by status" [(ngModel)]="trainerStatus" (change)="searchDirectory('Trainer')">
+        <option value="">All statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option>
+      </select>
+      <button type="button" class="secondary-btn" (click)="searchDirectory('Trainer')">Search</button>
+    </div>
+    <p *ngIf="loading" class="loading-message">Loading trainers…</p>
+    <div class="table-scroll" *ngIf="!loading">
+      <table>
+        <thead><tr><th>Trainer</th><th>Phone</th><th>Email</th><th>Specialization</th><th>Members</th><th>Assigned Batches</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let trainer of trainers">
+            <td>{{ trainer.name }}</td><td>{{ trainer.phone }}</td><td>{{ trainer.email || '—' }}</td>
+            <td>{{ trainer.specialization || '—' }}</td><td>{{ trainer.assignedMemberCount || 0 }}</td>
+            <td class="muted">Not tracked</td><td><span class="status" [class.inactive]="trainer.status === 'Inactive'">{{ trainer.status }}</span></td>
+            <td class="actions">
+              <button type="button" (click)="view(trainer)">View</button>
+              <button type="button" (click)="edit(trainer)">Edit</button>
+              <button type="button" (click)="openAssignments(trainer)">Members</button>
+              <button type="button" *ngIf="trainer.status === 'Active'" class="danger" (click)="setStatus(trainer, 'Inactive')">Deactivate</button>
+              <button type="button" *ngIf="trainer.status === 'Inactive'" (click)="setStatus(trainer, 'Active')">Activate</button>
+            </td>
+          </tr>
+          <tr *ngIf="!trainers.length"><td colspan="8" class="empty">No trainers match this search.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination" *ngIf="trainerPages > 1">
+      <button class="secondary-btn" type="button" [disabled]="trainerPage <= 1 || loading" (click)="changePage('Trainer', -1)">Previous</button>
+      <span>Page {{ trainerPage }} of {{ trainerPages }} · {{ trainerMatchTotal }} matching trainers</span>
+      <button class="secondary-btn" type="button" [disabled]="trainerPage >= trainerPages || loading" (click)="changePage('Trainer', 1)">Next</button>
+    </div>
+  </section>
+
+  <section class="section-panel">
+    <div class="section-heading">
+      <div><span class="eyebrow">SECTION 2</span><h3>Staff Management</h3></div>
+      <button class="primary-btn" type="button" (click)="toggleForm('Staff')">
+        {{ showStaffForm ? 'Close Staff Form' : '+ Add Staff' }}
+      </button>
+    </div>
+
+    <form class="form-panel" *ngIf="showStaffForm" (ngSubmit)="save('Staff')">
+      <h4>{{ editingStaffId ? 'Edit Staff Member' : 'Add Staff Member' }}</h4>
+      <div class="form-grid">
+        <label>Full Name *<input name="staffName" [(ngModel)]="staffForm.name" maxlength="120" required></label>
+        <label>Phone Number *<input name="staffPhone" [(ngModel)]="staffForm.phone" type="tel" maxlength="30" required></label>
+        <label>Email<input name="staffEmail" [(ngModel)]="staffForm.email" type="email"></label>
+        <label>Designation<input name="staffDesignation" [(ngModel)]="staffForm.designation" maxlength="120"></label>
+        <label>Department<input name="staffDepartment" [(ngModel)]="staffForm.department" maxlength="120"></label>
+        <label>Joining Date *<input name="staffJoiningDate" [(ngModel)]="staffForm.joiningDate" type="date" required></label>
+        <label>Salary<input name="staffSalary" [(ngModel)]="staffForm.salaryAmount" type="number" min="0" step="0.01"></label>
+        <label>Status
+          <select name="staffStatus" [(ngModel)]="staffForm.status">
+            <option value="Active">Active</option><option value="Inactive">Inactive</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="primary-btn" [disabled]="savingRole !== ''">{{ savingRole ? 'Saving…' : (editingStaffId ? 'Save Changes' : 'Add Staff') }}</button>
+        <button class="secondary-btn" type="button" *ngIf="editingStaffId" (click)="cancelEdit('Staff')">Cancel</button>
+      </div>
+    </form>
+
+    <div class="directory-tools">
+      <input aria-label="Search staff" placeholder="Search staff…" [(ngModel)]="staffSearch" (ngModelChange)="onDirectorySearchInput('Staff')">
+      <select aria-label="Filter staff by status" [(ngModel)]="staffStatus" (change)="searchDirectory('Staff')">
+        <option value="">All statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option>
+      </select>
+      <button type="button" class="secondary-btn" (click)="searchDirectory('Staff')">Search</button>
+    </div>
+    <p *ngIf="loading" class="loading-message">Loading staff…</p>
+    <div class="table-scroll" *ngIf="!loading">
+      <table>
+        <thead><tr><th>Staff Name</th><th>Phone</th><th>Email</th><th>Designation / Department</th><th>Joining Date</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let person of staff">
+            <td>{{ person.name }}</td><td>{{ person.phone }}</td><td>{{ person.email || '—' }}</td>
+            <td>{{ person.designation || '—' }}<span *ngIf="person.department"> · {{ person.department }}</span></td>
+            <td>{{ person.joiningDate ? (person.joiningDate | date:'mediumDate') : '—' }}</td>
+            <td><span class="status" [class.inactive]="person.status === 'Inactive'">{{ person.status }}</span></td>
+            <td class="actions">
+              <button type="button" (click)="view(person)">View</button>
+              <button type="button" (click)="edit(person)">Edit</button>
+              <button type="button" *ngIf="person.status === 'Active'" class="danger" (click)="setStatus(person, 'Inactive')">Deactivate</button>
+              <button type="button" *ngIf="person.status === 'Inactive'" (click)="setStatus(person, 'Active')">Activate</button>
+            </td>
+          </tr>
+          <tr *ngIf="!staff.length"><td colspan="7" class="empty">No staff members match this search.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination" *ngIf="staffPages > 1">
+      <button class="secondary-btn" type="button" [disabled]="staffPage <= 1 || loading" (click)="changePage('Staff', -1)">Previous</button>
+      <span>Page {{ staffPage }} of {{ staffPages }} · {{ staffMatchTotal }} matching staff</span>
+      <button class="secondary-btn" type="button" [disabled]="staffPage >= staffPages || loading" (click)="changePage('Staff', 1)">Next</button>
+    </div>
+  </section>
+
+  <section class="section-panel reports-panel">
+    <div class="section-heading"><div><span class="eyebrow">TEAM INSIGHTS</span><h3>Trainers &amp; Staff Reports</h3></div></div>
+    <div class="report-filters">
+      <label>Date range
+        <select [(ngModel)]="reportPeriod" (ngModelChange)="setReportPeriod($event)">
+          <option value="today">Today</option><option value="thisMonth">This Month</option>
+          <option value="lastMonth">Last Month</option><option value="custom">Custom Date Range</option>
+        </select>
+      </label>
+      <label *ngIf="reportPeriod === 'custom'">From<input type="date" [(ngModel)]="reportFrom"></label>
+      <label *ngIf="reportPeriod === 'custom'">To<input type="date" [(ngModel)]="reportTo"></label>
+      <label>Team
+        <select [(ngModel)]="reportRole"><option value="">Trainers &amp; Staff</option><option value="Trainer">Trainers</option><option value="Staff">Staff</option></select>
+      </label>
+      <label>Status
+        <select [(ngModel)]="reportStatus"><option value="">All statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option></select>
+      </label>
+      <button class="primary-btn" type="button" (click)="loadReport()" [disabled]="reportLoading">Apply Filters</button>
+    </div>
+    <p class="error-message" *ngIf="reportError" role="alert">{{ reportError }}</p>
+    <p class="loading-message" *ngIf="reportLoading">Loading reports…</p>
+    <div class="report-actions">
+      <span>{{ reportRecords.length }} matching records · exports include all matches</span>
+      <div>
+        <button type="button" (click)="exportReport('pdf')" [disabled]="reportLoading">PDF</button>
+        <button type="button" (click)="exportReport('excel')" [disabled]="reportLoading">Excel</button>
+        <button type="button" (click)="exportReport('csv')" [disabled]="reportLoading">CSV</button>
+        <button type="button" (click)="exportReport('print')" [disabled]="reportLoading">Print</button>
+      </div>
+    </div>
+    <div class="table-scroll" *ngIf="!reportLoading">
+      <table>
+        <thead><tr><th>Type</th><th>Name</th><th>Joining Date</th><th>Status</th><th>Assigned Member Count</th><th>Assigned Members</th><th>Designation / Specialization</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let row of reportRecords">
+            <td>{{ row.role }}</td><td>{{ row.name }}</td><td>{{ row.joiningDate ? (row.joiningDate | date:'mediumDate') : '—' }}</td>
+            <td>{{ row.status }}</td><td>{{ row.role === 'Trainer' ? (row.assignedMemberCount || 0) : '—' }}</td>
+            <td>{{ row.role === 'Trainer' ? assignedMemberSummary(row) : '—' }}</td>
+            <td>{{ row.role === 'Trainer' ? (row.specialization || '—') : (row.designation || '—') }}</td>
+          </tr>
+          <tr *ngIf="!reportRecords.length"><td colspan="7" class="empty">No records match the selected report filters.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="designation-summary" *ngIf="!reportLoading && staffByDesignation.length">
+      <h4>Staff by Designation / Department</h4>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Designation</th><th>Department</th><th>Total</th><th>Active</th><th>Inactive</th></tr></thead>
+          <tbody><tr *ngFor="let group of staffByDesignation">
+            <td>{{ group.designation }}</td><td>{{ group.department }}</td>
+            <td>{{ group.total }}</td><td>{{ group.active }}</td><td>{{ group.inactive }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="report-notes">
+      <p *ngIf="!reportCapabilities.trainerAttendance || !reportCapabilities.staffAttendance">Attendance reports are unavailable: the current system records member attendance only.</p>
+      <p *ngIf="!reportCapabilities.batchAssignments">Batch assignments and batch performance are unavailable: no batch records are configured in this application.</p>
+      <p *ngIf="!reportCapabilities.salaryTransactions">Salary paid/pending reports are unavailable: salary transactions are not recorded. Optional compensation amounts are profile information only.</p>
+    </div>
+  </section>
+
+  <div class="overlay" *ngIf="assignmentTrainer" (click)="closeAssignments()">
+    <section class="dialog-panel" role="dialog" aria-modal="true" [attr.aria-label]="'Assignments for ' + assignmentTrainer.name" (click)="$event.stopPropagation()">
+      <div class="section-heading"><div><span class="eyebrow">TRAINER ASSIGNMENTS</span><h3>{{ assignmentTrainer.name }}</h3></div><button class="secondary-btn" type="button" (click)="closeAssignments()">Close</button></div>
+      <p class="muted" *ngIf="assignmentTrainer.status !== 'Active'">This trainer is inactive. Reactivate them before assigning members.</p>
+      <form class="assignment-form" (ngSubmit)="assignMember()" *ngIf="assignmentTrainer.status === 'Active'">
+        <label>Assign or change a member
+          <select name="memberAssignment" [(ngModel)]="selectedMemberId" required>
+            <option value="">Select an active member</option>
+            <option *ngFor="let member of availableMembers" [value]="member._id">{{ member.fullName }} · {{ member.phone }}</option>
+          </select>
+        </label>
+        <button class="primary-btn" [disabled]="assigning || !selectedMemberId">{{ assigning ? 'Assigning…' : 'Assign Member' }}</button>
+      </form>
+      <p *ngIf="assignmentLoading">Loading assigned members…</p>
+      <div class="table-scroll" *ngIf="!assignmentLoading">
+        <table><thead><tr><th>Member</th><th>Phone</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let member of assignedMembers"><td>{{ member.fullName }}</td><td>{{ member.phone }}</td><td>{{ member.status }}</td>
+              <td><button class="danger-link" type="button" (click)="removeAssignment(member)">Remove</button></td></tr>
+            <tr *ngIf="!assignedMembers.length"><td colspan="4" class="empty">No members are assigned to this trainer.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="overlay" *ngIf="selectedRecord" (click)="selectedRecord = null">
+    <section class="dialog-panel detail-dialog" role="dialog" aria-modal="true" aria-label="Team member details" (click)="$event.stopPropagation()">
+      <div class="section-heading"><div><span class="eyebrow">{{ selectedRecord.role | uppercase }}</span><h3>{{ selectedRecord.name }}</h3></div><button class="secondary-btn" type="button" (click)="selectedRecord = null">Close</button></div>
+      <dl class="detail-grid">
+        <dt>Phone</dt><dd>{{ selectedRecord.phone }}</dd><dt>Email</dt><dd>{{ selectedRecord.email || '—' }}</dd>
+        <dt>Joining Date</dt><dd>{{ selectedRecord.joiningDate ? (selectedRecord.joiningDate | date:'mediumDate') : '—' }}</dd>
+        <dt>Specialization</dt><dd>{{ selectedRecord.specialization || '—' }}</dd>
+        <dt>Designation</dt><dd>{{ selectedRecord.designation || '—' }}</dd>
+        <dt>Department</dt><dd>{{ selectedRecord.department || '—' }}</dd>
+        <dt>Salary / Commission</dt><dd>{{ selectedRecord.salaryAmount == null ? '—' : ((selectedRecord.compensationType || 'Salary') + ' · ' + selectedRecord.salaryAmount) }}</dd>
+        <dt>Status</dt><dd>{{ selectedRecord.status }}</dd>
+      </dl>
+    </section>
+  </div>
+</section>

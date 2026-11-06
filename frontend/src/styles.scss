@@ -1,0 +1,75 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  background: #f5f6fa;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+.session-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 24px;
+  background: radial-gradient(ellipse at 18% 20%, rgba(106, 73, 255, .28), transparent 38%),
+    radial-gradient(ellipse at 85% 78%, rgba(0, 164, 255, .2), transparent 38%), #090d1c;
+  color: #f7f8ff;
+}
+
+.verification-glow { position: absolute; width: 65vw; height: 65vw; max-width: 760px; max-height: 760px; border: 1px solid rgba(148, 151, 255, .12); border-radius: 50%; box-shadow: 0 0 100px rgba(104, 87, 255, .13), inset 0 0 100px rgba(0, 166, 255, .06); animation: verification-orbit 22s linear infinite; }
+.verification-card { position: relative; width: min(100%, 510px); padding: clamp(28px, 6vw, 52px); border: 1px solid rgba(255, 255, 255, .12); border-radius: 26px; background: linear-gradient(145deg, rgba(28, 34, 60, .84), rgba(15, 21, 41, .82)); box-shadow: 0 28px 90px rgba(0, 0, 0, .45), inset 0 1px rgba(255, 255, 255, .08); text-align: center; backdrop-filter: blur(22px); animation: verification-appear .55s ease both; }
+.verification-brand { display: flex; align-items: center; justify-content: center; gap: 12px; text-align: left; }
+.verification-logo { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 14px; background: linear-gradient(135deg, #7d58ff, #2798ff); color: #fff; font-size: 19px; font-weight: 900; box-shadow: 0 8px 26px rgba(74, 105, 255, .38); }
+.verification-brand div { display: grid; gap: 4px; }
+.verification-brand strong { font-size: 13px; letter-spacing: 1.4px; }
+.verification-brand small { color: #9da8c3; font-size: 11px; }
+.verification-shield { display: grid; width: 74px; height: 74px; place-items: center; margin: 34px auto 18px; border: 1px solid rgba(111, 157, 255, .42); border-radius: 23px; background: linear-gradient(150deg, rgba(117, 83, 255, .22), rgba(33, 166, 255, .12)); color: #a7d8ff; font-size: 30px; box-shadow: 0 0 42px rgba(70, 127, 255, .22); animation: shield-pulse 2.8s ease-in-out infinite; }
+.verification-card h1 { margin: 0 0 10px; font-size: clamp(23px, 5vw, 30px); letter-spacing: -.5px; }
+.verification-card > p { margin: 0; color: #aab4ca; font-size: 14px; line-height: 1.6; }
+.verification-spinner { width: 30px; height: 30px; margin: 25px auto 20px; border: 3px solid rgba(157, 177, 255, .2); border-top-color: #57bbff; border-right-color: #9a72ff; border-radius: 50%; animation: verification-spin .9s linear infinite; }
+.verification-security { color: #8d99b3; font-size: 11px; letter-spacing: .3px; }
+.verification-security span { padding: 0 7px; color: #6faeff; }
+.verification-error { border-color: rgba(248, 113, 113, .22); }
+.verification-shield-error { border-color: rgba(248, 113, 113, .45); color: #ff9a9a; font-weight: 800; animation: none; }
+.verification-actions, .warning-actions { display: flex; justify-content: center; gap: 12px; margin: 25px 0 22px; }
+.verification-actions button, .warning-actions button { min-height: 44px; padding: 0 18px; border-radius: 10px; font: inherit; font-weight: 700; cursor: pointer; }
+.verification-primary, .stay-button { border: 0; background: linear-gradient(100deg, #7559ff, #238fea); color: #fff; box-shadow: 0 8px 24px rgba(77, 109, 255, .24); }
+.verification-secondary, .logout-now-button { border: 1px solid rgba(255, 255, 255, .18); background: rgba(255, 255, 255, .04); color: #e2e8f7; }
+.session-warning-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 20px; background: rgba(5, 9, 20, .72); backdrop-filter: blur(8px); }
+.session-warning { width: min(100%, 440px); padding: 30px; border: 1px solid #e7e9f1; border-radius: 18px; background: #fff; color: #202333; text-align: center; box-shadow: 0 24px 80px rgba(0, 0, 0, .24); }
+.warning-icon { display: grid; width: 54px; height: 54px; place-items: center; margin: 0 auto 14px; border-radius: 16px; background: #fff4e5; color: #bb6b00; font-size: 25px; }
+.session-warning h2 { margin: 0 0 10px; font-size: 21px; }
+.session-warning p { color: #606779; font-size: 14px; }
+.warning-countdown strong { color: #ab5a00; font-variant-numeric: tabular-nums; }
+.stay-button { background: #5447d9; }
+.logout-now-button { border-color: #d7dbe5; color: #42485a; background: #fff; }
+@keyframes verification-spin { to { transform: rotate(360deg); } }
+@keyframes verification-appear { from { opacity: 0; transform: translateY(12px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes shield-pulse { 50% { transform: translateY(-3px); box-shadow: 0 0 58px rgba(70, 127, 255, .34); } }
+@keyframes verification-orbit { to { transform: rotate(360deg); } }
+@media (max-width: 520px) {
+  .verification-card { border-radius: 20px; }
+  .verification-brand strong { font-size: 11px; }
+  .verification-brand small { font-size: 10px; }
+  .verification-actions, .warning-actions { flex-direction: column; }
+  .verification-actions button, .warning-actions button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .verification-glow, .verification-card, .verification-shield, .verification-spinner { animation: none; }
+}

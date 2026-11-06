@@ -1,0 +1,357 @@
+<section class="expenses-page">
+  <header class="page-heading">
+    <div>
+      <span class="eyebrow">BUSINESS MANAGEMENT</span>
+      <h1>Expense Tracker</h1>
+      <p>Record operating costs, track payments and prepare expense reports.</p>
+    </div>
+    <div class="heading-actions">
+      <button type="button" class="secondary-btn" (click)="openCategoryManager()">Manage Categories</button>
+      <button type="button" class="primary-btn" (click)="openCreateForm()">+ Add Expense</button>
+    </div>
+  </header>
+
+  <p class="feedback success" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+  <div class="feedback error" *ngIf="errorMessage" role="alert">
+    <span>{{ errorMessage }}</span>
+    <button type="button" (click)="loadExpenses()">Retry</button>
+  </div>
+
+  <section class="summary-grid" *ngIf="summary; else summarySkeletons" aria-label="Expense summary">
+    <article class="summary-card">
+      <span>Total Expenses</span>
+      <strong>{{ money(summary.totalExpenses) }}</strong>
+      <small>Selected date range</small>
+    </article>
+    <article class="summary-card paid">
+      <span>Paid Expenses</span>
+      <strong>{{ money(summary.paidExpenses) }}</strong>
+      <small>Recorded payments only</small>
+    </article>
+    <article class="summary-card pending">
+      <span>Pending Expenses</span>
+      <strong>{{ money(summary.pendingExpenses) }}</strong>
+      <small>Outstanding amount</small>
+    </article>
+    <article class="summary-card">
+      <span>This Month</span>
+      <strong>{{ money(summary.thisMonthExpenses) }}</strong>
+      <small>Current business calendar month</small>
+    </article>
+    <article class="summary-card">
+      <span>Today</span>
+      <strong>{{ money(summary.todayExpenses) }}</strong>
+      <small>Current business date</small>
+    </article>
+    <article class="summary-card category-summary">
+      <span>Highest Expense Category</span>
+      <strong>{{ summary.highestExpenseCategory?.name || '—' }}</strong>
+      <small>{{ summary.highestExpenseCategory ? money(summary.highestExpenseCategory.amount) : 'No expenses in this range' }}</small>
+    </article>
+  </section>
+  <ng-template #summarySkeletons>
+    <div class="summary-grid" *ngIf="loading" role="status" aria-label="Loading expense totals">
+      <div class="summary-card skeleton-card" *ngFor="let placeholder of [1,2,3,4,5,6]"></div>
+    </div>
+  </ng-template>
+
+  <section class="panel filter-panel" aria-label="Expense filters">
+    <label class="search-field">
+      Search
+      <input type="search" [(ngModel)]="search" (ngModelChange)="onSearchChange()"
+        placeholder="Title, category, vendor or invoice">
+    </label>
+    <label>Date range
+      <select [(ngModel)]="period" (ngModelChange)="onFiltersChange()">
+        <option value="all">All dates</option>
+        <option value="today">Today</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+        <option value="lastMonth">Last Month</option>
+        <option value="year">This Year</option>
+        <option value="custom">Custom Range</option>
+      </select>
+    </label>
+    <ng-container *ngIf="period === 'custom'">
+      <label>From
+        <input type="date" [(ngModel)]="customFrom" (ngModelChange)="onFiltersChange()">
+      </label>
+      <label>To
+        <input type="date" [(ngModel)]="customTo" (ngModelChange)="onFiltersChange()">
+      </label>
+    </ng-container>
+    <label>Category
+      <select [(ngModel)]="categoryFilter" (ngModelChange)="onFiltersChange()">
+        <option value="">All categories</option>
+        <option *ngFor="let category of activeCategories" [value]="category.name">{{ category.name }}</option>
+      </select>
+    </label>
+    <label>Payment status
+      <select [(ngModel)]="statusFilter" (ngModelChange)="onFiltersChange()">
+        <option value="">All statuses</option>
+        <option value="PAID">Paid</option>
+        <option value="PENDING">Pending</option>
+        <option value="PARTIALLY_PAID">Partially Paid</option>
+      </select>
+    </label>
+    <label>Sort
+      <select [(ngModel)]="sortBy" (ngModelChange)="onFiltersChange()">
+        <option value="expenseDate">Expense date</option>
+        <option value="title">Title</option>
+        <option value="category">Category</option>
+        <option value="vendor">Vendor</option>
+        <option value="amount">Amount</option>
+        <option value="status">Status</option>
+      </select>
+    </label>
+    <label>Order
+      <select [(ngModel)]="sortDirection" (ngModelChange)="onFiltersChange()">
+        <option value="desc">Newest / highest first</option>
+        <option value="asc">Oldest / lowest first</option>
+      </select>
+    </label>
+  </section>
+
+  <section class="panel table-panel">
+    <header class="panel-heading">
+      <div>
+        <h2>Expenses</h2>
+        <p>{{ pagination.total }} records · dates in {{ timeZone }}</p>
+      </div>
+      <div class="export-actions">
+        <button type="button" class="secondary-btn" (click)="printReport()" [disabled]="exporting">Print</button>
+        <button type="button" class="secondary-btn" (click)="exportPdf()" [disabled]="exporting">
+          {{ exporting ? 'Preparing…' : 'PDF' }}
+        </button>
+        <button type="button" class="secondary-btn" (click)="exportExcel()" [disabled]="exporting">Excel</button>
+        <button type="button" class="secondary-btn" (click)="exportCsv()" [disabled]="exporting">CSV</button>
+      </div>
+    </header>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Expense ID</th><th>Date</th><th>Title</th><th>Category</th><th>Vendor / Payee</th>
+            <th>Total</th><th>Paid</th><th>Outstanding</th><th>Status</th><th>Method</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngIf="loading">
+            <td colspan="11"><div class="table-loading" role="status">Loading expenses…</div></td>
+          </tr>
+          <tr *ngFor="let expense of expenses" [hidden]="loading">
+            <td class="mono">{{ expense._id.slice(-8).toUpperCase() }}</td>
+            <td>{{ formatDate(expense.expenseDate) }}</td>
+            <td class="title-cell">{{ expense.title }}</td>
+            <td>{{ expense.category }}</td>
+            <td>{{ expense.vendor || '—' }}</td>
+            <td>{{ money(expense.amount) }}</td>
+            <td>{{ money(expense.paidAmount) }}</td>
+            <td>{{ money(expense.outstandingAmount) }}</td>
+            <td><span class="status-badge" [ngClass]="expense.status.toLowerCase()">{{ expense.status.replace('_', ' ') }}</span></td>
+            <td>{{ expense.paymentMethod || '—' }}</td>
+            <td class="row-actions">
+              <button type="button" (click)="openDetails(expense)">View</button>
+              <button type="button" (click)="openEditForm(expense)">Edit</button>
+              <button type="button" class="delete-action" (click)="removeExpense(expense)"
+                [disabled]="deletingId === expense._id">
+                {{ deletingId === expense._id ? 'Archiving…' : 'Archive' }}
+              </button>
+            </td>
+          </tr>
+          <tr *ngIf="!loading && !errorMessage && expenses.length === 0">
+            <td colspan="11" class="empty-state">No expenses match these filters.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="pagination" *ngIf="pagination.totalPages > 0">
+      <span>{{ pagination.total }} matching expenses · Page {{ pagination.page }} of {{ pagination.totalPages }}</span>
+      <div>
+        <button type="button" (click)="changePage(-1)" [disabled]="pagination.page <= 1 || loading">Previous</button>
+        <button type="button" (click)="changePage(1)" [disabled]="pagination.page >= pagination.totalPages || loading">Next</button>
+      </div>
+    </footer>
+  </section>
+
+  <section class="panel reports-panel">
+    <header class="panel-heading">
+      <div><h2>Expense Reports</h2><p>Category, vendor and payment-status breakdowns for the selected range.</p></div>
+      <button type="button" class="primary-btn" (click)="loadReport()" [disabled]="reportLoading">
+        {{ reportLoading ? 'Generating…' : reportTitle }}
+      </button>
+    </header>
+    <p class="feedback error" *ngIf="reportError" role="alert">{{ reportError }}</p>
+    <ng-container *ngIf="report">
+      <div class="report-summary">
+        <div><span>Total expense</span><strong>{{ money(report.summary.totalExpenses) }}</strong></div>
+        <div><span>Paid</span><strong>{{ money(report.summary.paidAmount) }}</strong></div>
+        <div><span>Outstanding</span><strong>{{ money(report.summary.outstandingAmount) }}</strong></div>
+        <div><span>Period</span><strong>{{ report.range.from }} – {{ report.range.to }}</strong></div>
+      </div>
+      <div class="report-breakdowns">
+        <div>
+          <h3>Category-wise</h3>
+          <div class="breakdown-row" *ngFor="let row of report.categories">
+            <span>{{ row.name }} <small>({{ row.count }})</small></span><strong>{{ money(row.total) }}</strong>
+          </div>
+          <p *ngIf="report.categories.length === 0" class="empty-state">No category totals for this range.</p>
+        </div>
+        <div>
+          <h3>Vendor-wise</h3>
+          <div class="breakdown-row" *ngFor="let row of report.vendors">
+            <span>{{ row.name }} <small>({{ row.count }})</small></span><strong>{{ money(row.total) }}</strong>
+          </div>
+          <p *ngIf="report.vendors.length === 0" class="empty-state">No vendor totals for this range.</p>
+        </div>
+        <div>
+          <h3>Paid vs Pending</h3>
+          <div class="breakdown-row" *ngFor="let row of report.statuses">
+            <span>{{ row.status.replace('_', ' ') }} <small>({{ row.count }})</small></span><strong>{{ money(row.outstanding) }} due</strong>
+          </div>
+          <p *ngIf="report.statuses.length === 0" class="empty-state">No status totals for this range.</p>
+        </div>
+      </div>
+    </ng-container>
+  </section>
+</section>
+
+<div class="modal-backdrop" *ngIf="showForm" (click)="closeForm()">
+  <section class="expense-modal" role="dialog" aria-modal="true" aria-labelledby="expense-form-title"
+    (click)="$event.stopPropagation()">
+    <header class="modal-heading">
+      <div><span class="eyebrow">EXPENSE MANAGEMENT</span><h2 id="expense-form-title">{{ editingExpense ? 'Edit Expense' : 'Add Expense' }}</h2></div>
+      <button type="button" class="close-btn" (click)="closeForm()" [disabled]="saving">×</button>
+    </header>
+    <p class="feedback error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <form (ngSubmit)="saveExpense()">
+      <div class="form-grid">
+        <label>Expense title *
+          <input name="title" [(ngModel)]="form.title" maxlength="120" required>
+        </label>
+        <label>Category *
+          <select name="category" [(ngModel)]="form.category" required>
+            <option value="">Select category</option>
+            <option *ngFor="let category of activeCategories" [value]="category.name">{{ category.name }}</option>
+          </select>
+        </label>
+        <label>Total amount (INR) *
+          <input name="amount" type="number" min="0.01" step="0.01" [(ngModel)]="form.amount" required>
+        </label>
+        <label>Expense date *
+          <input name="expenseDate" type="date" [(ngModel)]="form.expenseDate" required>
+        </label>
+        <label *ngIf="!editingExpense">Payment status *
+          <select name="status" [(ngModel)]="form.status" (ngModelChange)="onStatusChange()" required>
+            <option value="PENDING">Pending</option>
+            <option value="PAID">Paid</option>
+            <option value="PARTIALLY_PAID">Partially Paid</option>
+          </select>
+        </label>
+        <label *ngIf="!editingExpense && form.status !== 'PENDING'">
+          {{ form.status === 'PAID' ? 'Amount paid (INR)' : 'Paid so far (INR)' }} *
+          <input name="paidAmount" type="number" min="0.01" step="0.01" [(ngModel)]="form.paidAmount" required>
+        </label>
+        <label *ngIf="editingExpense">Record additional payment (INR)
+          <input name="paymentAmount" type="number" min="0" step="0.01" [(ngModel)]="form.paymentAmount">
+        </label>
+        <label>Payment method *
+          <select name="paymentMethod" [(ngModel)]="form.paymentMethod" required>
+            <option *ngFor="let method of paymentMethods" [value]="method">{{ method }}</option>
+          </select>
+        </label>
+        <label>Vendor / Payee
+          <input name="vendor" [(ngModel)]="form.vendor" maxlength="120">
+        </label>
+        <label>Invoice number
+          <input name="invoiceNumber" [(ngModel)]="form.invoiceNumber" maxlength="80">
+        </label>
+        <label>Transaction reference
+          <input name="transactionReference" [(ngModel)]="form.transactionReference" maxlength="120">
+        </label>
+        <label *ngIf="editingExpense && hasPaymentAmount()">Payment reference
+          <input name="paymentReference" [(ngModel)]="form.paymentReference" maxlength="120">
+        </label>
+        <label class="wide-field">Description / notes
+          <textarea name="description" rows="3" [(ngModel)]="form.description" maxlength="2000"></textarea>
+        </label>
+        <label class="wide-field" *ngIf="editingExpense && hasPaymentAmount()">Payment notes
+          <textarea name="paymentNotes" rows="2" [(ngModel)]="form.paymentNotes" maxlength="500"></textarea>
+        </label>
+      </div>
+      <p class="form-note" *ngIf="!editingExpense">Only amounts entered as paid are included in paid expense totals. Membership payments are not affected.</p>
+      <p class="form-note" *ngIf="editingExpense">Payment entries are append-only for auditability. The payment status is calculated from recorded payments.</p>
+      <footer class="modal-actions">
+        <button type="button" class="secondary-btn" (click)="closeForm()" [disabled]="saving">Cancel</button>
+        <button type="submit" class="primary-btn" [disabled]="saving || categoriesLoading">
+          {{ saving ? 'Saving…' : editingExpense ? 'Save Changes' : 'Save Expense' }}
+        </button>
+      </footer>
+    </form>
+  </section>
+</div>
+
+<div class="modal-backdrop" *ngIf="showDetails && selectedExpense" (click)="showDetails = false">
+  <section class="expense-modal details-modal" role="dialog" aria-modal="true" aria-labelledby="expense-detail-title"
+    (click)="$event.stopPropagation()">
+    <header class="modal-heading">
+      <div><span class="eyebrow">EXPENSE DETAILS</span><h2 id="expense-detail-title">{{ selectedExpense.title }}</h2></div>
+      <button type="button" class="close-btn" (click)="showDetails = false">×</button>
+    </header>
+    <dl class="detail-grid">
+      <div><dt>Category</dt><dd>{{ selectedExpense.category }}</dd></div>
+      <div><dt>Date</dt><dd>{{ formatDate(selectedExpense.expenseDate) }}</dd></div>
+      <div><dt>Total amount</dt><dd>{{ money(selectedExpense.amount) }}</dd></div>
+      <div><dt>Paid</dt><dd>{{ money(selectedExpense.paidAmount) }}</dd></div>
+      <div><dt>Outstanding</dt><dd>{{ money(selectedExpense.outstandingAmount) }}</dd></div>
+      <div><dt>Status</dt><dd>{{ selectedExpense.status.replace('_', ' ') }}</dd></div>
+      <div><dt>Vendor</dt><dd>{{ selectedExpense.vendor || '—' }}</dd></div>
+      <div><dt>Invoice</dt><dd>{{ selectedExpense.invoiceNumber || '—' }}</dd></div>
+      <div class="wide-field"><dt>Description</dt><dd>{{ selectedExpense.description || '—' }}</dd></div>
+    </dl>
+    <h3>Payment history</h3>
+    <div class="payment-history" *ngIf="selectedExpense.payments.length; else noPayments">
+      <div *ngFor="let payment of selectedExpense.payments">
+        <span>{{ formatDate(payment.paidAt) }} · {{ payment.paymentMethod }}</span>
+        <strong>{{ money(payment.amount) }}</strong>
+        <small *ngIf="payment.reference">{{ payment.reference }}</small>
+      </div>
+    </div>
+    <ng-template #noPayments><p class="empty-state">No payments have been recorded.</p></ng-template>
+  </section>
+</div>
+
+<div class="modal-backdrop" *ngIf="showCategoryManager" (click)="showCategoryManager = false">
+  <section class="expense-modal category-modal" role="dialog" aria-modal="true" aria-labelledby="category-title"
+    (click)="$event.stopPropagation()">
+    <header class="modal-heading">
+      <div><span class="eyebrow">CONFIGURATION</span><h2 id="category-title">Expense Categories</h2></div>
+      <button type="button" class="close-btn" (click)="showCategoryManager = false">×</button>
+    </header>
+    <p class="form-note">Default categories are fixed. Custom categories can be renamed or deactivated; existing expense history is retained.</p>
+    <button type="button" class="primary-btn add-category" (click)="openCategoryForm()">+ Add Custom Category</button>
+    <div class="category-list">
+      <div class="category-row" *ngFor="let category of categories">
+        <span>{{ category.name }} <small>{{ category.isDefault ? 'Default' : category.isActive ? 'Active' : 'Inactive' }}</small></span>
+        <button type="button" *ngIf="!category.isDefault" (click)="openCategoryForm(category)">Edit</button>
+      </div>
+    </div>
+    <div class="category-edit" *ngIf="showCategoryForm">
+      <p class="feedback error" *ngIf="categoryError" role="alert">{{ categoryError }}</p>
+      <label>Category name
+        <input [(ngModel)]="categoryName" maxlength="80" [disabled]="categorySaving">
+      </label>
+      <label class="active-toggle" *ngIf="editingCategory">
+        <input type="checkbox" [(ngModel)]="categoryActive" [disabled]="categorySaving"> Active
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" (click)="showCategoryForm = false" [disabled]="categorySaving">Cancel</button>
+        <button type="button" class="primary-btn" (click)="saveCategory()" [disabled]="categorySaving || !categoryName.trim()">
+          {{ categorySaving ? 'Saving…' : 'Save Category' }}
+        </button>
+      </div>
+    </div>
+  </section>
+</div>

@@ -1,0 +1,400 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.expiry-panel {
+  margin-bottom: 20px;
+  padding: 21px;
+  border: 1px solid #eceef3;
+  border-radius: 12px;
+  background: #fff;
+  min-width: 0;
+}
+
+.expiry-heading,
+.expiry-row,
+.expiry-pagination,
+.expiry-pagination > div,
+.row-actions,
+.renewal-modal header,
+.renewal-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.expiry-heading h3,
+.renewal-modal h3 {
+  margin: 5px 0;
+  color: #252838;
+  font-size: 15px;
+}
+
+.expiry-heading p,
+.renewal-modal header p {
+  margin: 0;
+  color: #9295a1;
+  font-size: 10px;
+}
+
+.eyebrow {
+  color: #e63946;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.text-btn,
+.member-link {
+  border: 0;
+  background: transparent;
+  color: #e63946;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.expiry-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.expiry-counts article {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid #eceef3;
+  border-radius: 9px;
+  background: #fafbfc;
+}
+
+.expiry-counts span {
+  color: #777b88;
+  font-size: 10px;
+}
+
+.expiry-counts strong {
+  color: #252838;
+  font-size: 23px;
+}
+
+.expiry-counts article:nth-child(2) strong {
+  color: #d18413;
+}
+
+.expiry-counts article:nth-child(3) strong {
+  color: #d83c49;
+}
+
+.expiry-list {
+  display: grid;
+}
+
+.expiry-row {
+  justify-content: flex-start;
+  padding: 13px 0;
+  border-top: 1px solid #f0f1f4;
+}
+
+.member-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffe8e9;
+  color: #e63946;
+  font-weight: 800;
+}
+
+.member-details {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.member-link {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.member-details > span,
+.expiry-date span {
+  color: #858895;
+  font-size: 10px;
+}
+
+.separator {
+  padding: 0 3px;
+  color: #c3c5cd;
+}
+
+.expiry-date {
+  display: grid;
+  gap: 4px;
+  min-width: 110px;
+}
+
+.expiry-date strong {
+  color: #343747;
+  font-size: 10px;
+}
+
+.status-badge {
+  padding: 6px 9px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-badge.expiringSoon {
+  color: #9c6910;
+  background: #fff4d8;
+}
+
+.status-badge.today {
+  color: #ad5312;
+  background: #ffeadb;
+}
+
+.status-badge.expired {
+  color: #c42f3d;
+  background: #ffe8e9;
+}
+
+.row-actions {
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.renew-btn,
+.contact-btn,
+.cancel-btn,
+.expiry-pagination button,
+.expiry-feedback button {
+  padding: 8px 10px;
+  border: 1px solid #eceef3;
+  border-radius: 7px;
+  background: white;
+  color: #343747;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.renew-btn {
+  border-color: #e63946;
+  background: #e63946;
+  color: white;
+}
+
+.contact-btn {
+  color: #168657;
+}
+
+.renew-btn:disabled,
+.expiry-pagination button:disabled,
+.renewal-modal button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.expiry-empty {
+  display: grid;
+  gap: 7px;
+  padding: 28px 12px;
+  border-top: 1px solid #f0f1f4;
+  color: #777b88;
+  font-size: 11px;
+  text-align: center;
+}
+
+.expiry-empty strong {
+  color: #343747;
+}
+
+.expiry-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.expiry-feedback.success {
+  color: #158452;
+  background: #e9f8f0;
+}
+
+.expiry-feedback.error {
+  color: #c42f3d;
+  background: #fff0f1;
+}
+
+.expiry-skeleton {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.expiry-skeleton div {
+  height: 54px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f1f2f6 25%, #f8f9fb 50%, #f1f2f6 75%);
+  background-size: 200% 100%;
+  animation: expiry-shimmer 1.3s infinite linear;
+}
+
+@keyframes expiry-shimmer {
+  to { background-position: -200% 0; }
+}
+
+.expiry-filters {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1.2fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.expiry-filters label,
+.renewal-modal label {
+  display: grid;
+  gap: 6px;
+  color: #616574;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.expiry-filters input,
+.expiry-filters select,
+.renewal-modal input,
+.renewal-modal select {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #e3e5eb;
+  border-radius: 7px;
+  background: white;
+  color: #343747;
+  font: inherit;
+}
+
+.expiry-pagination {
+  padding-top: 14px;
+  border-top: 1px solid #f0f1f4;
+  color: #777b88;
+  font-size: 10px;
+}
+
+.expiry-pagination > div {
+  justify-content: flex-end;
+}
+
+.renewal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: #17192380;
+}
+
+.renewal-modal {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 480px);
+  padding: 24px;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 20px 70px #17192340;
+}
+
+.renewal-modal header {
+  align-items: flex-start;
+}
+
+.close-btn {
+  border: 0;
+  background: transparent;
+  color: #777b88;
+  font-size: 25px;
+  cursor: pointer;
+}
+
+.renewal-note {
+  margin: -6px 0 0;
+  color: #777b88;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.renewal-modal footer {
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid #f0f1f4;
+}
+
+@media (max-width: 900px) {
+  .expiry-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expiry-row {
+    flex-wrap: wrap;
+  }
+
+  .row-actions {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .expiry-counts {
+    gap: 7px;
+  }
+
+  .expiry-counts article {
+    padding: 10px 8px;
+  }
+
+  .expiry-counts span {
+    min-height: 28px;
+    font-size: 9px;
+  }
+
+  .expiry-counts strong {
+    font-size: 20px;
+  }
+
+  .expiry-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .expiry-date {
+    min-width: auto;
+  }
+
+  .status-badge {
+    margin-left: 50px;
+  }
+
+  .row-actions {
+    width: calc(100% - 50px);
+    margin-left: 50px;
+    justify-content: flex-start;
+  }
+}
