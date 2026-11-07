@@ -17,6 +17,7 @@ import { BusinessSettings } from './pages/settings/settings';
 import { SubscriptionPage } from './pages/subscription/subscription';
 import { ExpiringMember, MembershipExpiry } from './pages/membership-expiry/membership-expiry';
 import { ExpenseTracker } from './pages/expenses/expense-tracker';
+import { DatabaseStorage } from './pages/database-storage/database-storage';
 import { SessionActivityService } from './services/session-activity';
 
 import { environment } from '../environments/environment';
@@ -36,7 +37,8 @@ import { environment } from '../environments/environment';
     BusinessSettings,
     SubscriptionPage,
     MembershipExpiry,
-    ExpenseTracker
+    ExpenseTracker,
+    DatabaseStorage
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss'
@@ -117,6 +119,7 @@ export class App implements OnInit, OnDestroy {
       title: 'SYSTEM',
       items: [
         { name: 'Settings', icon: '⚙' },
+        { name: 'Database Storage', icon: '▦' },
         { name: 'Subscription', icon: '◇' }
       ]
     }

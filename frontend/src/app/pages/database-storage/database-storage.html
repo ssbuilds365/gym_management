@@ -1,0 +1,319 @@
+<section class="database-page">
+  <header class="page-heading">
+    <div class="heading-copy">
+      <div class="breadcrumbs"><span>System</span><span aria-hidden="true">›</span><strong>Database Storage</strong></div>
+      <div class="title-row">
+        <span class="title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>
+        </span>
+        <div>
+          <h1>Database Storage</h1>
+          <p>Real-time storage usage of your MongoDB Atlas database.</p>
+        </div>
+      </div>
+    </div>
+    <div class="heading-actions">
+      <div class="connection-pill" [class.online]="status?.connected === true" [class.offline]="status?.connected === false">
+        <span class="state-dot" aria-hidden="true"></span>
+        {{ status?.connected === true ? 'Connected' : status?.connected === false ? 'Unavailable' : 'Checking connection' }}
+      </div>
+      <button class="refresh-button" type="button" (click)="refresh()" [disabled]="loading || refreshing">
+        <svg [class.spinning]="refreshing" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"></path></svg>
+        {{ refreshing ? 'Refreshing…' : 'Refresh' }}
+      </button>
+      <div class="last-updated">
+        <span>Last updated</span>
+        <strong>{{ formatTimestamp(summary?.refreshedAt) }}</strong>
+      </div>
+    </div>
+  </header>
+
+  <p class="error-banner" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
+  <div class="initial-loading" *ngIf="loading" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    <span>Loading database storage…</span>
+  </div>
+
+  <ng-container *ngIf="!loading">
+    <section class="overview-grid" aria-label="Storage overview">
+      <article class="cluster-card">
+        <div class="cluster-card-heading">
+          <span class="atlas-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3 3.8 17.2a2 2 0 0 0 1.7 3h13a2 2 0 0 0 1.7-3L12 3Z"></path><path d="M12 10v5m0 3h.01"></path></svg>
+          </span>
+          <div class="cluster-title">
+            <h2>Atlas Cluster Storage</h2>
+            <span class="health-badge" *ngIf="summary?.platformAdmin && summary.platformStorage?.atlasStorage?.available">
+              <span aria-hidden="true"></span>{{ getStorageWarning(summary.platformStorage.atlasStorage.utilizationPercent) === 'Normal' ? 'Healthy' : getStorageWarning(summary.platformStorage.atlasStorage.utilizationPercent) }}
+            </span>
+            <span class="unavailable-badge" *ngIf="!summary?.platformAdmin || !summary.platformStorage?.atlasStorage?.available">Unavailable</span>
+          </div>
+        </div>
+        <ng-container *ngIf="summary?.platformAdmin && summary.platformStorage?.atlasStorage as atlasStorage">
+          <ng-container *ngIf="atlasStorage.available; else capacityUnavailable">
+            <div class="cluster-usage">
+              <strong>{{ formatBytes(atlasStorage.usedBytes) }} <span>/ {{ formatBytes(atlasStorage.capacityBytes) }}</span></strong>
+              <small>{{ atlasStorage.clusterName || 'Cluster name unavailable' }} · {{ atlasStorage.clusterTier || 'Tier unavailable' }}</small>
+            </div>
+            <div class="progress-track" role="progressbar"
+              [attr.aria-valuenow]="atlasStorage.utilizationPercent"
+              aria-valuemin="0" aria-valuemax="100"
+              [attr.aria-label]="'Atlas storage utilization ' + (atlasStorage.utilizationPercent ?? 0) + ' percent'">
+              <span [style.width.%]="atlasStorage.utilizationPercent ?? 0"
+                [class.progress-warning]="getStorageWarning(atlasStorage.utilizationPercent) !== 'Normal'"></span>
+            </div>
+            <div class="usage-caption">
+              <span>{{ atlasStorage.utilizationPercent === null ? 'Unavailable' : (atlasStorage.utilizationPercent | number:'1.0-2') + '% Used' }}</span>
+              <span>Measured {{ formatTimestamp(atlasStorage.measuredAt) }}</span>
+            </div>
+          </ng-container>
+          <ng-template #capacityUnavailable>
+            <div class="capacity-unavailable">
+              <strong>Capacity unavailable</strong>
+              <span>{{ atlasStorage.reason || 'Atlas has not provided verifiable storage capacity metrics.' }}</span>
+            </div>
+          </ng-template>
+        </ng-container>
+        <div class="capacity-unavailable" *ngIf="!summary?.platformAdmin">
+          <strong>Capacity unavailable</strong>
+          <span>Shared Atlas capacity is restricted to authorized platform administrators.</span>
+        </div>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-icon database-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>
+        </span>
+        <span class="summary-label">Database Size</span>
+        <strong>{{ formatBytes(summary?.platformStorage?.databaseStats?.dataSizeBytes) }}</strong>
+        <small>{{ summary?.platformAdmin ? 'Actual MongoDB data size' : 'Shared database metric restricted' }}</small>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon index-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"></path></svg>
+        </span>
+        <span class="summary-label">Index Size</span>
+        <strong>{{ formatBytes(summary?.platformStorage?.databaseStats?.indexSizeBytes) }}</strong>
+        <small>{{ summary?.platformAdmin ? 'Actual MongoDB index size' : 'Shared database metric restricted' }}</small>
+      </article>
+      <article class="summary-card">
+        <span class="summary-icon document-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"></path><path d="M14 3v6h5"></path></svg>
+        </span>
+        <span class="summary-label">Total Documents</span>
+        <strong>{{ formatNumber(summary?.platformAdmin ? summary.platformStorage?.databaseStats?.documentCount : summary?.tenantDocumentCount) }}</strong>
+        <small>{{ summary?.platformAdmin ? 'All database documents' : 'Your tenant-scoped documents' }}</small>
+      </article>
+    </section>
+
+    <section class="detail-layout" aria-label="Storage and collection details">
+      <article class="surface storage-details">
+        <div class="card-heading">
+          <span class="section-icon info-icon" aria-hidden="true">i</span>
+          <h2>Storage Details</h2>
+        </div>
+        <dl class="storage-list">
+          <div><dt>Cluster Name</dt><dd>{{ summary?.platformAdmin ? (summary.platformStorage?.atlasStorage?.clusterName || 'Unavailable') : 'Restricted' }}</dd></div>
+          <div><dt>Database Name</dt><dd>{{ summary?.platformAdmin ? (summary.platformStorage?.databaseName || 'Unavailable') : 'Restricted' }}</dd></div>
+          <div><dt>Cluster Tier</dt><dd>{{ summary?.platformAdmin ? (summary.platformStorage?.atlasStorage?.clusterTier || 'Unavailable') : 'Restricted' }}</dd></div>
+          <div><dt>Total Capacity</dt><dd>{{ summary?.platformAdmin ? formatBytes(summary.platformStorage?.atlasStorage?.capacityBytes) : 'Unavailable' }}</dd></div>
+          <div><dt>Used Storage</dt><dd>{{ summary?.platformAdmin ? formatBytes(summary.platformStorage?.atlasStorage?.usedBytes) : 'Unavailable' }}</dd></div>
+          <div><dt>Available Storage</dt><dd>{{ summary?.platformAdmin ? formatBytes(summary.platformStorage?.atlasStorage?.freeBytes) : 'Unavailable' }}</dd></div>
+          <div><dt>Usage</dt><dd>{{ summary?.platformAdmin && summary.platformStorage?.atlasStorage?.utilizationPercent !== null && summary.platformStorage?.atlasStorage?.utilizationPercent !== undefined ? (summary.platformStorage?.atlasStorage?.utilizationPercent | number:'1.0-2') + '%' : 'Unavailable' }}</dd></div>
+        </dl>
+        <p class="restricted-note" *ngIf="!summary?.platformAdmin">
+          Shared cluster and database details are visible only to authorized platform administrators.
+        </p>
+      </article>
+
+      <article class="surface collections-card">
+        <div class="collections-heading">
+          <div class="card-heading">
+            <span class="section-icon collection-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>
+            </span>
+            <h2>Collections ({{ formatNumber(collections.length) }})</h2>
+          </div>
+          <label class="collection-search">
+            <span class="sr-only">Search collections</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+            <input type="search" [(ngModel)]="searchText" (ngModelChange)="collectionPage = 1" placeholder="Search collection…">
+          </label>
+        </div>
+        <div class="table-scroll" *ngIf="pagedCollections.length; else emptyCollections">
+          <table class="collections-table">
+            <thead>
+              <tr><th>Collection</th><th>Documents</th><th>Size (Approx.)</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let collection of pagedCollections">
+                <td>
+                  <span class="collection-name">
+                    <span class="row-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>
+                    </span>
+                    <span><strong>{{ collection.name }}</strong><small>{{ collection.modelName }}</small></span>
+                  </span>
+                </td>
+                <td>{{ formatNumber(collection.documentCount) }}</td>
+                <td>{{ formatBytes(collection.estimatedSizeBytes) }}</td>
+                <td>
+                  <button class="manage-button" type="button" (click)="manageCollection(collection)">
+                    {{ collection.managementCategory && !collection.protected ? 'Manage' : 'Details' }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ng-template #emptyCollections>
+          <p class="empty-state">{{ collections.length ? 'No collections match your search.' : 'No tenant-scoped collections are available.' }}</p>
+        </ng-template>
+        <div class="table-footer" *ngIf="filteredCollections.length">
+          <span>{{ formatNumber(filteredCollections.length) }} tenant-scoped collections</span>
+          <div class="pagination-controls" *ngIf="totalCollectionPages > 1">
+            <button type="button" (click)="collectionPage = collectionPage - 1" [disabled]="collectionPage <= 1" aria-label="Previous collections">‹</button>
+            <span>Page {{ collectionPage }} of {{ totalCollectionPages }}</span>
+            <button type="button" (click)="collectionPage = collectionPage + 1" [disabled]="collectionPage >= totalCollectionPages" aria-label="Next collections">›</button>
+          </div>
+        </div>
+        <p class="table-note">Document counts are scoped to your tenant. Collection size is shared across tenants and shown only to platform administrators.</p>
+      </article>
+    </section>
+
+    <details class="audit-details">
+      <summary>Recent tenant deletion history</summary>
+      <p class="error-banner" *ngIf="historyError" role="alert">{{ historyError }}</p>
+      <p *ngIf="historyLoading" role="status">Loading deletion history…</p>
+      <div class="history-list" *ngIf="!historyLoading && history.length">
+        <article class="history-entry" *ngFor="let item of history">
+          <div>
+            <strong>{{ item.category }} · {{ item.status }}</strong>
+            <span>{{ formatNumber(item.affectedRecordCount) }} record(s) · {{ formatTimestamp(item.createdAt) }}</span>
+            <small>{{ item.reason }}</small>
+          </div>
+        </article>
+        <button class="history-more" type="button" *ngIf="historyPage * 20 < historyTotal" (click)="nextHistoryPage()">Older activity</button>
+      </div>
+      <p class="empty-state" *ngIf="!historyLoading && !historyError && !history.length">No data-management deletion history.</p>
+    </details>
+  </ng-container>
+
+  <div class="modal-backdrop" *ngIf="managementOpen" (click)="closeManagement()">
+    <section class="management-modal" role="dialog" aria-modal="true" aria-labelledby="management-title" (click)="$event.stopPropagation()">
+      <header class="modal-heading">
+        <div>
+          <span class="eyebrow">TENANT COLLECTION MANAGEMENT</span>
+          <h2 id="management-title">{{ activeManagementCollection?.name || managementCategoryLabel }}</h2>
+          <p>Records and available actions are restricted to your authenticated tenant.</p>
+        </div>
+        <button type="button" class="modal-close" aria-label="Close collection management" (click)="closeManagement()">×</button>
+      </header>
+
+      <p class="success-banner" *ngIf="managementSuccess" role="status">{{ managementSuccess }}</p>
+      <p class="error-banner" *ngIf="managementError" role="alert">{{ managementError }}</p>
+      <div class="management-controls">
+        <label class="management-search">
+          <span>Search records</span>
+          <input type="search" [(ngModel)]="recordSearch" placeholder="Search this collection">
+        </label>
+        <label>
+          <span>Status</span>
+          <select [(ngModel)]="statusFilter">
+            <option value="">All statuses</option>
+            <option *ngFor="let value of managementStatuses" [value]="value">{{ value }}</option>
+          </select>
+        </label>
+        <label><span>From date</span><input type="date" [(ngModel)]="dateFrom"></label>
+        <label><span>To date</span><input type="date" [(ngModel)]="dateTo"></label>
+        <button class="secondary-action" type="button" (click)="applyManagementFilters()" [disabled]="managementLoading">Apply filters</button>
+      </div>
+
+      <div class="management-actions">
+        <span>{{ formatNumber(managementTotal) }} records · {{ selectedCount }} selected (maximum 20)</span>
+        <button class="danger-action" type="button" (click)="previewDeletion()" [disabled]="!selectedCount || selectedCount > 20 || previewLoading || managementLoading">
+          {{ previewLoading ? 'Preparing preview…' : 'Preview delete (' + selectedCount + ')' }}
+        </button>
+      </div>
+      <p class="safety-note">Payments, memberships, attendance, invoices, receipts, and financial audit history cannot be deleted here. Member, staff, and expense actions use existing business workflows.</p>
+
+      <p class="loading-message" *ngIf="managementLoading" role="status">Loading tenant records…</p>
+      <div class="table-scroll management-table-wrap" *ngIf="!managementLoading && managementRecords.length">
+        <table class="management-table">
+          <thead><tr><th><span class="sr-only">Select</span></th><th>Record</th><th>Details</th><th>Date</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let record of managementRecords">
+              <td><input type="checkbox" [checked]="selectedIds.has(record._id)" [disabled]="!selectedIds.has(record._id) && selectedCount >= 20" (change)="onRecordSelection(record._id, $event)" [attr.aria-label]="'Select ' + recordLabel(record)"></td>
+              <td><strong>{{ recordLabel(record) }}</strong></td>
+              <td>
+                <ng-container *ngIf="managementCategory === 'expenses'; else standardDetails">
+                  {{ record.category }} · {{ record.amountMinor === undefined ? '' : (record.amountMinor / 100 | currency:'INR':'symbol':'1.2-2') }}
+                </ng-container>
+                <ng-template #standardDetails>{{ record.role || record.status || 'Tenant record' }}</ng-template>
+              </td>
+              <td>{{ recordDate(record) }}</td>
+              <td>{{ record.status || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="empty-state" *ngIf="!managementLoading && !managementError && !managementRecords.length">No {{ managementCategoryLabel.toLowerCase() }} records match these filters.</p>
+      <div class="pagination-controls management-pagination" *ngIf="managementTotal">
+        <button type="button" class="secondary-action" (click)="goToManagementPage(managementPage - 1)" [disabled]="managementPage <= 1 || managementLoading">Previous</button>
+        <span>Page {{ managementPage }} of {{ totalManagementPages }}</span>
+        <button type="button" class="secondary-action" (click)="goToManagementPage(managementPage + 1)" [disabled]="managementPage >= totalManagementPages || managementLoading">Next</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" *ngIf="preview" (click)="closePreview()">
+    <section class="delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" (click)="$event.stopPropagation()">
+      <header>
+        <span class="eyebrow">DELETE PREVIEW</span>
+        <button type="button" class="modal-close" aria-label="Close preview" (click)="closePreview()" [disabled]="deleting">×</button>
+      </header>
+      <h3 id="delete-title">Delete {{ preview.selectedCount }} record(s) from {{ activeManagementCollection?.name || managementCategoryLabel }}?</h3>
+      <p>Review the selected records and related-data impact. The existing tenant-safe business workflow determines the final changes; financial transactions and audit history are retained.</p>
+      <ul class="preview-records">
+        <li *ngFor="let record of preview.records"><strong>{{ recordLabel(record) }}</strong><span>{{ recordDate(record) }} · {{ record.status || record.role || record.category || 'Record' }}</span></li>
+      </ul>
+      <div class="impact-panel">
+        <strong>Related records and consequences</strong>
+        <ul><li *ngFor="let item of preview.impact | keyvalue">{{ item.key }}: {{ item.value }}</li><li *ngIf="!hasImpact(preview.impact)">The existing business workflow will validate related records at deletion time.</li></ul>
+      </div>
+      <p class="error-banner" *ngIf="previewError" role="alert">{{ previewError }}</p>
+      <label class="reason-input"><span>Reason for deletion</span><textarea [(ngModel)]="deleteReason" rows="2" maxlength="500" placeholder="Enter at least 8 characters"></textarea></label>
+      <label class="confirm-input"><span>Type DELETE to confirm</span><input [(ngModel)]="deleteConfirmation" autocomplete="off"></label>
+      <footer>
+        <button type="button" class="secondary-action" (click)="closePreview()" [disabled]="deleting">Cancel</button>
+        <button type="button" class="danger-action" (click)="confirmDeletion()" [disabled]="deleting || !!previewError || deleteConfirmation !== 'DELETE' || deleteReason.trim().length < 8">
+          {{ deleting ? 'Deleting…' : 'Confirm deletion' }}
+        </button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" *ngIf="collectionDetails || collectionDetailsLoading || collectionDetailsError" (click)="closeCollectionDetails()">
+    <section class="delete-modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="collection-detail-title" (click)="$event.stopPropagation()">
+      <header>
+        <span class="eyebrow">COLLECTION DETAILS</span>
+        <button type="button" class="modal-close" aria-label="Close details" (click)="closeCollectionDetails()">×</button>
+      </header>
+      <p *ngIf="collectionDetailsLoading" role="status">Loading collection details…</p>
+      <p class="error-banner" *ngIf="collectionDetailsError" role="alert">{{ collectionDetailsError }}</p>
+      <ng-container *ngIf="collectionDetails as details">
+        <h3 id="collection-detail-title">{{ details.name }}</h3>
+        <p>{{ details.modelName }} · {{ details.collectionType }} · tenant-scoped</p>
+        <div class="detail-grid">
+          <span>Tenant document count</span><strong>{{ formatNumber(details.documentCount) }}</strong>
+          <ng-container *ngIf="summary?.platformAdmin"><span>Shared database documents</span><strong>{{ formatNumber(details.sharedDocumentCount) }}</strong></ng-container>
+          <span>Estimated collection size</span><strong>{{ formatBytes(details.estimatedSizeBytes) }}</strong>
+          <span>Index count</span><strong>{{ formatNumber(details.indexes.length) }}</strong>
+        </div>
+        <p class="safety-note" *ngIf="!activeManagementCollection?.managementCategory || activeManagementCollection.protected">This collection is read-only here. No record deletion action is available.</p>
+        <h4>Index definitions</h4>
+        <ul class="index-list"><li *ngFor="let index of details.indexes"><strong>{{ index.name }}</strong><span>{{ index.keys.join(', ') }}{{ index.unique ? ' · unique' : '' }}{{ index.sparse ? ' · sparse' : '' }}{{ index.expiresAfterSeconds === null ? '' : ' · TTL ' + index.expiresAfterSeconds + 's' }}</span></li></ul>
+      </ng-container>
+    </section>
+  </div>
+</section>

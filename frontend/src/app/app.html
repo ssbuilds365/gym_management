@@ -489,6 +489,18 @@
       }
     </div>
 
+    <div [hidden]="selectedMenu !== 'Database Storage'">
+      @defer (when selectedMenu === 'Database Storage') {
+        <app-database-storage (navigateToMenu)="selectMenu($event)"></app-database-storage>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Database Storage loading">
+          <div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Database Storage.</p>
+      }
+    </div>
+
     <div [hidden]="selectedMenu !== 'Subscription'">
       @defer (when selectedMenu === 'Subscription') {
         <app-subscription></app-subscription>

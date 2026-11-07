@@ -35,10 +35,25 @@ if (nodeEnv !== 'production') {
   allowedOrigins.add('http://localhost:60949');
 }
 
+const platformAdminOwnerIds = (process.env.PLATFORM_ADMIN_OWNER_IDS || '')
+  .split(',')
+  .map((id) => id.trim().toLowerCase())
+  .filter(Boolean);
+if (platformAdminOwnerIds.some(id => !/^[a-f\d]{24}$/i.test(id))) {
+  throw new Error('PLATFORM_ADMIN_OWNER_IDS must contain comma-separated MongoDB ObjectIds');
+}
+
 module.exports = Object.freeze({
   port,
   nodeEnv,
   mongodbUri: process.env.MONGODB_URI,
+  platformAdminOwnerIds: Object.freeze(platformAdminOwnerIds),
+  atlas: Object.freeze({
+    publicKey: process.env.ATLAS_PUBLIC_KEY || '',
+    privateKey: process.env.ATLAS_PRIVATE_KEY || '',
+    projectId: process.env.ATLAS_PROJECT_ID || '',
+    clusterName: process.env.ATLAS_CLUSTER_NAME || ''
+  }),
   jwtSecret: process.env.JWT_SECRET || '',
   frontendUrl,
   smtp: Object.freeze({
