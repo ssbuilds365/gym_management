@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://gym-management-1-1nnb.onrender.com/api/$1"
+      "destination": "https://gym-management-llv3.onrender.com/api/$1"
     },
     {
       "source": "/(.*)",
