@@ -56,7 +56,20 @@ const expenseSnapshot = expense => ({
   invoiceNumber: expense.invoiceNumber,
   transactionReference: expense.transactionReference,
   description: expense.description,
-  paymentMethod: expense.paymentMethod
+  paymentMethod: expense.paymentMethod,
+  payments: (expense.payments || []).map(payment => ({
+    amountMinor: payment.amountMinor,
+    paymentMethod: payment.paymentMethod,
+    paidAt: payment.paidAt,
+    reference: payment.reference,
+    notes: payment.notes,
+    requestId: payment.requestId,
+    recordedBy: payment.recordedBy
+  })),
+  dueDate: expense.dueDate,
+  notes: expense.notes,
+  archivedAt: expense.archivedAt,
+  receipt: expense.receipt
 });
 
 const serializeExpense = expense => ({
@@ -73,13 +86,23 @@ const serializeExpense = expense => ({
   invoiceNumber: expense.invoiceNumber,
   transactionReference: expense.transactionReference,
   description: expense.description,
+  notes: expense.notes || '',
+  dueDate: expense.dueDate || null,
+  receipt: expense.receipt?.publicId
+    ? {
+        originalName: expense.receipt.originalName,
+        uploadedAt: expense.receipt.uploadedAt
+      }
+    : null,
+  archivedAt: expense.archivedAt || expense.deletedAt || null,
   payments: (expense.payments || []).map(payment => ({
     _id: payment._id,
     amount: payment.amountMinor / 100,
     paymentMethod: payment.paymentMethod,
     paidAt: payment.paidAt,
     reference: payment.reference,
-    notes: payment.notes
+    notes: payment.notes,
+    recordedBy: payment.recordedBy
   })),
   createdAt: expense.createdAt,
   updatedAt: expense.updatedAt

@@ -25,6 +25,13 @@ const businessSchema = new mongoose.Schema(
       default: process.env.DASHBOARD_TIME_ZONE || 'Asia/Kolkata'
     },
 
+    expenseRetentionMonths: {
+      type: Number,
+      min: 1,
+      max: 120,
+      default: 12
+    },
+
     ownerName: {
       type: String,
       required: true,

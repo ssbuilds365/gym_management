@@ -6,8 +6,11 @@
       <p>Record operating costs, track payments and prepare expense reports.</p>
     </div>
     <div class="heading-actions">
+      <button type="button" class="secondary-btn" (click)="loadExpenses()" [disabled]="loading">
+        {{ loading ? 'Refreshing…' : 'Refresh' }}
+      </button>
       <button type="button" class="secondary-btn" (click)="openCategoryManager()">Manage Categories</button>
-      <button type="button" class="primary-btn" (click)="openCreateForm()">+ Add Expense</button>
+      <button type="button" class="primary-btn" (click)="openCreateForm()" *ngIf="archiveFilter === 'active'">+ Add Expense</button>
     </div>
   </header>
 
@@ -54,6 +57,32 @@
       <div class="summary-card skeleton-card" *ngFor="let placeholder of [1,2,3,4,5,6]"></div>
     </div>
   </ng-template>
+
+  <section class="analytics-grid" *ngIf="summary">
+    <article class="panel analytics-card">
+      <header class="panel-heading">
+        <div><h2>Expenses by Category</h2><p>Actual recorded amounts for the selected range</p></div>
+      </header>
+      <div class="category-chart" *ngIf="summary.categories.length; else noCategoryChart">
+        <div class="category-chart-row" *ngFor="let item of summary.categories">
+          <div class="category-chart-label"><span>{{ item.name }}</span><strong>{{ money(item.amount) }}</strong></div>
+          <div class="chart-track"><span [style.width]="categoryBarWidth(item.amount)"></span></div>
+        </div>
+      </div>
+      <ng-template #noCategoryChart><p class="empty-state">No category totals for this range.</p></ng-template>
+    </article>
+    <article class="panel analytics-card">
+      <header class="panel-heading">
+        <div><h2>Monthly Trend</h2><p>Last 12 months · including archived history</p></div>
+      </header>
+      <div class="trend-chart" *ngIf="summary.monthlyTrend?.length">
+        <div class="trend-column" *ngFor="let item of summary.monthlyTrend" [attr.title]="monthLabel(item.month) + ': ' + money(item.total)">
+          <span class="trend-value" [style.height]="trendBarHeight(item.total)"></span>
+          <small>{{ monthLabel(item.month) }}</small>
+        </div>
+      </div>
+    </article>
+  </section>
 
   <section class="panel filter-panel" aria-label="Expense filters">
     <label class="search-field">
@@ -113,19 +142,46 @@
     </label>
   </section>
 
+  <section class="panel retention-panel">
+    <div>
+      <span class="eyebrow">DATA RETENTION &amp; CLEANUP</span>
+      <h2>Keep financial history protected</h2>
+      <p>Choose how long expense records are retained. This preference never triggers automatic deletion; archived expenses and payment history remain available for reports.</p>
+      <p class="retention-message" *ngIf="retentionMessage" role="status">{{ retentionMessage }}</p>
+    </div>
+    <label>Retention period
+      <select [(ngModel)]="retentionMonths" [disabled]="retentionSaving">
+        <option [ngValue]="12">12 months</option>
+        <option [ngValue]="24">24 months</option>
+        <option [ngValue]="36">36 months</option>
+        <option [ngValue]="60">5 years</option>
+        <option [ngValue]="120">10 years</option>
+      </select>
+    </label>
+    <button type="button" class="secondary-btn" (click)="saveRetention()" [disabled]="retentionSaving">
+      {{ retentionSaving ? 'Saving…' : 'Save Preference' }}
+    </button>
+  </section>
+
   <section class="panel table-panel">
     <header class="panel-heading">
       <div>
-        <h2>Expenses</h2>
+        <h2>{{ archiveFilter === 'active' ? 'Expenses' : 'Archived Expenses' }}</h2>
         <p>{{ pagination.total }} records · dates in {{ timeZone }}</p>
       </div>
-      <div class="export-actions">
+      <div class="table-toolbar">
+        <div class="archive-tabs" role="tablist" aria-label="Expense records">
+          <button type="button" [class.selected]="archiveFilter === 'active'" (click)="selectArchiveTab('active')">Active</button>
+          <button type="button" [class.selected]="archiveFilter === 'archived'" (click)="selectArchiveTab('archived')">Archive</button>
+        </div>
+        <div class="export-actions">
         <button type="button" class="secondary-btn" (click)="printReport()" [disabled]="exporting">Print</button>
         <button type="button" class="secondary-btn" (click)="exportPdf()" [disabled]="exporting">
           {{ exporting ? 'Preparing…' : 'PDF' }}
         </button>
         <button type="button" class="secondary-btn" (click)="exportExcel()" [disabled]="exporting">Excel</button>
         <button type="button" class="secondary-btn" (click)="exportCsv()" [disabled]="exporting">CSV</button>
+        </div>
       </div>
     </header>
 
@@ -154,11 +210,18 @@
             <td>{{ expense.paymentMethod || '—' }}</td>
             <td class="row-actions">
               <button type="button" (click)="openDetails(expense)">View</button>
-              <button type="button" (click)="openEditForm(expense)">Edit</button>
-              <button type="button" class="delete-action" (click)="removeExpense(expense)"
-                [disabled]="deletingId === expense._id">
-                {{ deletingId === expense._id ? 'Archiving…' : 'Archive' }}
-              </button>
+              <ng-container *ngIf="archiveFilter === 'active'; else restoreAction">
+                <button type="button" (click)="openEditForm(expense)">Edit</button>
+                <button type="button" class="delete-action" (click)="removeExpense(expense)"
+                  [disabled]="deletingId === expense._id">
+                  {{ deletingId === expense._id ? 'Archiving…' : 'Archive' }}
+                </button>
+              </ng-container>
+              <ng-template #restoreAction>
+                <button type="button" (click)="restoreExpense(expense)" [disabled]="deletingId === expense._id">
+                  {{ deletingId === expense._id ? 'Restoring…' : 'Restore' }}
+                </button>
+              </ng-template>
             </td>
           </tr>
           <tr *ngIf="!loading && !errorMessage && expenses.length === 0">
@@ -243,21 +306,16 @@
         <label>Expense date *
           <input name="expenseDate" type="date" [(ngModel)]="form.expenseDate" required>
         </label>
-        <label *ngIf="!editingExpense">Payment status *
-          <select name="status" [(ngModel)]="form.status" (ngModelChange)="onStatusChange()" required>
-            <option value="PENDING">Pending</option>
-            <option value="PAID">Paid</option>
-            <option value="PARTIALLY_PAID">Partially Paid</option>
-          </select>
-        </label>
-        <label *ngIf="!editingExpense && form.status !== 'PENDING'">
-          {{ form.status === 'PAID' ? 'Amount paid (INR)' : 'Paid so far (INR)' }} *
-          <input name="paidAmount" type="number" min="0.01" step="0.01" [(ngModel)]="form.paidAmount" required>
+        <label>Due date
+          <input name="dueDate" type="date" [(ngModel)]="form.dueDate">
         </label>
         <label *ngIf="editingExpense">Record additional payment (INR)
-          <input name="paymentAmount" type="number" min="0" step="0.01" [(ngModel)]="form.paymentAmount">
+          <input name="paymentAmount" type="number" min="0" [max]="editingExpense.outstandingAmount" step="0.01" [(ngModel)]="form.paymentAmount">
         </label>
-        <label>Payment method *
+        <label *ngIf="editingExpense && hasPaymentAmount()">Payment date *
+          <input name="paymentDate" type="date" [(ngModel)]="form.paymentDate" required>
+        </label>
+        <label *ngIf="editingExpense && hasPaymentAmount()">Payment method *
           <select name="paymentMethod" [(ngModel)]="form.paymentMethod" required>
             <option *ngFor="let method of paymentMethods" [value]="method">{{ method }}</option>
           </select>
@@ -274,14 +332,22 @@
         <label *ngIf="editingExpense && hasPaymentAmount()">Payment reference
           <input name="paymentReference" [(ngModel)]="form.paymentReference" maxlength="120">
         </label>
-        <label class="wide-field">Description / notes
+        <label class="wide-field">Description
           <textarea name="description" rows="3" [(ngModel)]="form.description" maxlength="2000"></textarea>
+        </label>
+        <label class="wide-field">Internal notes
+          <textarea name="notes" rows="2" [(ngModel)]="form.notes" maxlength="2000"></textarea>
+        </label>
+        <label class="wide-field" *ngIf="!editingExpense?.receipt">Receipt (PDF, JPG or PNG · max 8 MB)
+          <input name="receipt" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+            (change)="onReceiptSelected($event)" [disabled]="saving">
+          <small *ngIf="receiptFile">{{ receiptFile.name }}</small>
         </label>
         <label class="wide-field" *ngIf="editingExpense && hasPaymentAmount()">Payment notes
           <textarea name="paymentNotes" rows="2" [(ngModel)]="form.paymentNotes" maxlength="500"></textarea>
         </label>
       </div>
-      <p class="form-note" *ngIf="!editingExpense">Only amounts entered as paid are included in paid expense totals. Membership payments are not affected.</p>
+      <p class="form-note" *ngIf="!editingExpense">New expenses are saved as pending. Record an actual payment after saving; membership payments are not affected.</p>
       <p class="form-note" *ngIf="editingExpense">Payment entries are append-only for auditability. The payment status is calculated from recorded payments.</p>
       <footer class="modal-actions">
         <button type="button" class="secondary-btn" (click)="closeForm()" [disabled]="saving">Cancel</button>
@@ -309,7 +375,15 @@
       <div><dt>Status</dt><dd>{{ selectedExpense.status.replace('_', ' ') }}</dd></div>
       <div><dt>Vendor</dt><dd>{{ selectedExpense.vendor || '—' }}</dd></div>
       <div><dt>Invoice</dt><dd>{{ selectedExpense.invoiceNumber || '—' }}</dd></div>
+      <div><dt>Due date</dt><dd>{{ selectedExpense.dueDate ? formatDate(selectedExpense.dueDate) : '—' }}</dd></div>
+      <div><dt>Receipt</dt><dd>
+        <button type="button" class="receipt-link" *ngIf="selectedExpense.receipt" (click)="openReceipt(selectedExpense)">
+          {{ selectedExpense.receipt.originalName || 'Open receipt' }}
+        </button>
+        <span *ngIf="!selectedExpense.receipt">—</span>
+      </dd></div>
       <div class="wide-field"><dt>Description</dt><dd>{{ selectedExpense.description || '—' }}</dd></div>
+      <div class="wide-field"><dt>Internal notes</dt><dd>{{ selectedExpense.notes || '—' }}</dd></div>
     </dl>
     <h3>Payment history</h3>
     <div class="payment-history" *ngIf="selectedExpense.payments.length; else noPayments">

@@ -4,6 +4,7 @@ const {
   DEFAULT_EXPENSE_CATEGORIES,
   deriveExpenseStatus,
   parseExpenseDate,
+  serializeExpense,
   toMinorUnits
 } = require('../utils/expenses');
 const {
@@ -26,6 +27,24 @@ test('expense status is derived from recorded paid amount', () => {
   assert.equal(deriveExpenseStatus(10000, 10000), 'PAID');
 });
 
+test('expense serialization exposes receipt metadata but not private Cloudinary identifiers', () => {
+  const result = serializeExpense({
+    amountMinor: 1250,
+    paidAmountMinor: 0,
+    payments: [],
+    receipt: {
+      publicId: 'private/tenant/asset',
+      resourceType: 'raw',
+      format: 'pdf',
+      originalName: 'invoice.pdf',
+      uploadedAt: new Date('2026-11-06T00:00:00Z')
+    }
+  });
+  assert.equal(result.receipt.originalName, 'invoice.pdf');
+  assert.equal(result.receipt.publicId, undefined);
+  assert.equal(result.receipt.url, undefined);
+});
+
 test('expense date parsing uses the business local calendar date', () => {
   assert.equal(
     parseExpenseDate('2026-03-08', 'America/Los_Angeles').toISOString(),
@@ -34,7 +53,7 @@ test('expense date parsing uses the business local calendar date', () => {
   assert.equal(parseExpenseDate('2026-02-30', 'Asia/Kolkata'), null);
 });
 
-test('expense create validation accepts paid, pending and partial entries without fabricating payments', () => {
+test('new expenses start pending and do not fabricate payment records', () => {
   const ownerId = '507f1f77bcf86cd799439011';
   const base = {
     title: 'Electricity',
@@ -48,10 +67,11 @@ test('expense create validation accepts paid, pending and partial entries withou
   assert.equal(pending.data.paidAmountMinor, 0);
   assert.equal(pending.data.payments.length, 0);
 
-  const paid = validateCreateExpense({ ...base, status: 'PAID' }, 'Asia/Kolkata', ownerId);
+  const paid = validateCreateExpense({ ...base, status: 'PAID', paidAmount: base.amount }, 'Asia/Kolkata', ownerId);
   assert.equal(paid.error, undefined);
-  assert.equal(paid.data.paidAmountMinor, 120000);
-  assert.equal(paid.data.payments[0].amountMinor, 120000);
+  assert.equal(paid.data.status, 'PENDING');
+  assert.equal(paid.data.paidAmountMinor, 0);
+  assert.equal(paid.data.payments.length, 0);
 
   const partial = validateCreateExpense({
     ...base,
@@ -59,11 +79,12 @@ test('expense create validation accepts paid, pending and partial entries withou
     paidAmount: '400.25'
   }, 'Asia/Kolkata', ownerId);
   assert.equal(partial.error, undefined);
-  assert.equal(partial.data.paidAmountMinor, 40025);
-  assert.equal(partial.data.payments.length, 1);
+  assert.equal(partial.data.status, 'PENDING');
+  assert.equal(partial.data.paidAmountMinor, 0);
+  assert.equal(partial.data.payments.length, 0);
 });
 
-test('expense validation rejects a partial entry without an actual paid amount', () => {
+test('expense creation does not accept a client-supplied payment status as proof of payment', () => {
   const result = validateCreateExpense({
     title: 'Repair',
     category: 'Equipment Repair',
@@ -72,7 +93,9 @@ test('expense validation rejects a partial entry without an actual paid amount',
     status: 'PARTIALLY_PAID',
     paidAmount: 100
   }, 'Asia/Kolkata', 'owner-1');
-  assert.equal(result.error, 'Paid amount does not match the selected payment status');
+  assert.equal(result.error, undefined);
+  assert.equal(result.data.status, 'PENDING');
+  assert.equal(result.data.paidAmountMinor, 0);
 });
 
 test('expense filters always scope to authenticated tenant and business', () => {
@@ -83,6 +106,18 @@ test('expense filters always scope to authenticated tenant and business', () => 
     businessId,
     query: { search: 'rent', category: 'Rent', status: 'PENDING' },
     range: { from: new Date('2026-11-01T00:00:00Z'), toExclusive: new Date('2026-12-01T00:00:00Z') }
+  });
+
+  test('active and archived expense filters include both archive schemas without losing tenant scope', () => {
+    const base = { tenantId: 'authenticated-tenant', businessId: 'authenticated-business' };
+    const active = buildExpenseFilter({ ...base, query: {}, range: null });
+    assert.equal(active.archivedAt, null);
+    assert.equal(active.deletedAt, null);
+
+    const archived = buildExpenseFilter({ ...base, query: { archived: 'true' }, range: null });
+    assert.equal(archived.tenantId, base.tenantId);
+    assert.equal(archived.businessId, base.businessId);
+    assert.equal(archived.$and[0].$or.length, 2);
   });
   assert.equal(filter.tenantId, tenantId);
   assert.equal(filter.businessId, businessId);

@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { finalize, Subscription } from 'rxjs';
+import { finalize, of, Subscription, switchMap } from 'rxjs';
 import { jsPDF } from 'jspdf';
 import { ExpenseQuery, ExpenseService } from '../../services/expense';
 
@@ -26,6 +26,10 @@ interface ExpenseRecord {
   invoiceNumber: string;
   transactionReference: string;
   description: string;
+  notes?: string;
+  dueDate?: string | null;
+  archivedAt?: string | null;
+  receipt?: { originalName: string; uploadedAt: string } | null;
   payments: Array<{
     amount: number;
     paymentMethod: string;
@@ -59,6 +63,7 @@ export class ExpenseTracker implements OnInit, OnDestroy {
   search = '';
   categoryFilter = '';
   statusFilter = '';
+  archiveFilter: 'active' | 'archived' = 'active';
   sortBy = 'expenseDate';
   sortDirection: 'asc' | 'desc' = 'desc';
 
@@ -72,6 +77,9 @@ export class ExpenseTracker implements OnInit, OnDestroy {
   successMessage = '';
   reportError = '';
   report: any = null;
+  retentionMonths = 12;
+  retentionSaving = false;
+  retentionMessage = '';
 
   showForm = false;
   editingExpense: ExpenseRecord | null = null;
@@ -98,6 +106,8 @@ export class ExpenseTracker implements OnInit, OnDestroy {
   private exportRequest?: Subscription;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private customRangeInitialized = false;
+  private paymentRequestId = '';
+  receiptFile: File | null = null;
 
   constructor(
     private readonly expenseService: ExpenseService,
@@ -106,6 +116,7 @@ export class ExpenseTracker implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadCategories();
+    this.loadRetention();
     this.loadExpenses();
   }
 
@@ -125,9 +136,10 @@ export class ExpenseTracker implements OnInit, OnDestroy {
       category: '',
       amount: '',
       expenseDate: this.businessToday(),
-      status: 'PENDING',
-      paidAmount: '',
+      dueDate: '',
+      notes: '',
       paymentAmount: '',
+      paymentDate: this.businessToday(),
       paymentMethod: 'Cash',
       paymentReference: '',
       vendor: '',
@@ -165,6 +177,7 @@ export class ExpenseTracker implements OnInit, OnDestroy {
       search: this.search.trim(),
       category: this.categoryFilter,
       status: this.statusFilter,
+      archived: this.archiveFilter === 'archived' ? 'true' : undefined,
       page,
       limit: this.pagination.limit,
       sortBy: this.sortBy,
@@ -228,16 +241,10 @@ export class ExpenseTracker implements OnInit, OnDestroy {
     if (page !== this.pagination.page) this.loadExpenses(page);
   }
 
-  onStatusChange(): void {
-    if (this.form.status === 'PAID') {
-      this.form.paidAmount = this.form.amount;
-    } else if (this.form.status === 'PENDING') {
-      this.form.paidAmount = 0;
-    }
-  }
-
   openCreateForm(): void {
     this.editingExpense = null;
+    this.paymentRequestId = '';
+    this.receiptFile = null;
     this.form = this.emptyForm();
     this.form.category = this.categories.find(item => item.isActive)?.name || '';
     this.formError = '';
@@ -246,14 +253,17 @@ export class ExpenseTracker implements OnInit, OnDestroy {
 
   openEditForm(expense: ExpenseRecord): void {
     this.editingExpense = expense;
+    this.paymentRequestId = '';
+    this.receiptFile = null;
     this.form = {
       title: expense.title,
       category: expense.category,
       amount: expense.amount,
       expenseDate: this.expenseDateInput(expense.expenseDate),
-      status: expense.status,
-      paidAmount: expense.paidAmount,
+      dueDate: expense.dueDate ? this.expenseDateInput(expense.dueDate) : '',
+      notes: expense.notes || '',
       paymentAmount: '',
+      paymentDate: this.businessToday(),
       paymentMethod: expense.paymentMethod || 'Cash',
       paymentReference: '',
       vendor: expense.vendor,
@@ -283,25 +293,42 @@ export class ExpenseTracker implements OnInit, OnDestroy {
       vendor: this.form.vendor,
       invoiceNumber: this.form.invoiceNumber,
       transactionReference: this.form.transactionReference,
-      description: this.form.description
+      description: this.form.description,
+      dueDate: this.form.dueDate || null,
+      notes: this.form.notes
     };
-    if (this.editingExpense) {
-      if (Number(this.form.paymentAmount) > 0) {
-        payload['paymentAmount'] = Number(this.form.paymentAmount);
-        payload['paymentMethod'] = this.form.paymentMethod;
-        payload['paymentReference'] = this.form.paymentReference;
-        payload['paymentNotes'] = this.form.paymentNotes;
-      }
-    } else {
-      payload['status'] = this.form.status;
-      payload['paidAmount'] = Number(this.form.paidAmount || 0);
-      payload['paymentMethod'] = this.form.paymentMethod;
-    }
 
     this.saving = true;
-    const request = this.editingExpense
-      ? this.expenseService.update(this.editingExpense._id, payload)
-      : this.expenseService.create(payload);
+    const editingExpense = this.editingExpense;
+    if (editingExpense && Number(this.form.paymentAmount) > 0 && !this.paymentRequestId) {
+      this.paymentRequestId = crypto.randomUUID();
+    }
+    const request = editingExpense
+      ? this.expenseService.update(editingExpense._id, payload).pipe(
+          switchMap(response => Number(this.form.paymentAmount) > 0
+            ? this.expenseService.recordPayment(editingExpense._id, {
+                amount: Number(this.form.paymentAmount),
+                paymentMethod: this.form.paymentMethod,
+                paymentDate: this.form.paymentDate,
+                reference: this.form.paymentReference,
+                notes: this.form.paymentNotes,
+                requestId: this.paymentRequestId
+              })
+            : of(response)),
+          switchMap(response => this.receiptFile
+            ? this.expenseService.uploadReceipt(editingExpense._id, this.receiptFile)
+            : of(response))
+        )
+      : this.expenseService.create(payload).pipe(
+          switchMap(response => {
+            const createdId = response.expense?._id;
+            if (!createdId) return of(response);
+            this.editingExpense = response.expense;
+            return this.receiptFile
+              ? this.expenseService.uploadReceipt(createdId, this.receiptFile)
+              : of(response);
+          })
+        );
     this.saveRequest = request.pipe(finalize(() => {
       this.saving = false;
       this.changeDetector.markForCheck();
@@ -313,14 +340,48 @@ export class ExpenseTracker implements OnInit, OnDestroy {
             return;
           }
           this.showForm = false;
-          this.successMessage = this.editingExpense ? 'Expense updated.' : 'Expense saved.';
+          this.paymentRequestId = '';
+          this.receiptFile = null;
+          this.successMessage = editingExpense ? 'Expense updated.' : 'Expense saved as pending.';
           this.loadExpenses(1);
         },
         error: error => {
           console.error('Expense save error:', error);
-          this.formError = error.error?.message || 'Unable to save expense.';
+          this.formError = error.error?.message || error.message || 'Unable to save expense.';
+          if (this.editingExpense) {
+            this.successMessage = 'Expense details were saved, but the receipt or payment step failed. You can retry safely.';
+            this.loadExpenses(1);
+          }
         }
       });
+  }
+
+  onReceiptSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] || null;
+    if (file && file.size > 8 * 1024 * 1024) {
+      this.formError = 'Receipt file must be 8 MB or smaller.';
+      input.value = '';
+      this.receiptFile = null;
+      return;
+    }
+    this.formError = '';
+    this.receiptFile = file;
+  }
+
+  openReceipt(expense: ExpenseRecord): void {
+    const popup = window.open('', '_blank');
+    this.expenseService.receiptUrl(expense._id).subscribe({
+      next: response => {
+        if (popup) popup.location.href = response.url;
+        else window.location.href = response.url;
+      },
+      error: error => {
+        popup?.close();
+        console.error('Expense receipt access error:', error);
+        this.errorMessage = error.error?.message || 'Unable to open the receipt.';
+      }
+    });
   }
 
   removeExpense(expense: ExpenseRecord): void {
@@ -346,6 +407,84 @@ export class ExpenseTracker implements OnInit, OnDestroy {
           this.errorMessage = error.error?.message || 'Unable to archive expense.';
         }
       });
+  }
+
+  restoreExpense(expense: ExpenseRecord): void {
+    if (this.deletingId) return;
+    this.deletingId = expense._id;
+    this.expenseService.restore(expense._id)
+      .pipe(finalize(() => {
+        this.deletingId = '';
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: () => {
+          this.successMessage = 'Expense restored to active records.';
+          this.loadExpenses(this.pagination.page);
+        },
+        error: error => {
+          console.error('Expense restore error:', error);
+          this.errorMessage = error.error?.message || 'Unable to restore expense.';
+        }
+      });
+  }
+
+  loadRetention(): void {
+    this.expenseService.getRetention().subscribe({
+      next: response => this.retentionMonths = Number(response.retentionMonths) || 12,
+      error: error => {
+        console.error('Expense retention settings error:', error);
+        this.errorMessage = error.error?.message || 'Unable to load retention settings.';
+      }
+    });
+  }
+
+  saveRetention(): void {
+    if (this.retentionSaving) return;
+    this.retentionSaving = true;
+    this.retentionMessage = '';
+    this.expenseService.updateRetention(Number(this.retentionMonths))
+      .pipe(finalize(() => {
+        this.retentionSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          this.retentionMonths = Number(response.retentionMonths);
+          this.retentionMessage = 'Retention preference saved. No records are automatically deleted.';
+        },
+        error: error => {
+          console.error('Expense retention update error:', error);
+          this.retentionMessage = error.error?.message || 'Unable to save retention preference.';
+        }
+      });
+  }
+
+  selectArchiveTab(tab: 'active' | 'archived'): void {
+    if (this.archiveFilter === tab) return;
+    this.archiveFilter = tab;
+    this.loadExpenses(1);
+  }
+
+  get maxCategoryTotal(): number {
+    return Math.max(1, ...(this.summary?.categories || []).map((item: any) => Number(item.amount) || 0));
+  }
+
+  categoryBarWidth(value: number): string {
+    return `${Math.max(4, Math.round((Number(value) / this.maxCategoryTotal) * 100))}%`;
+  }
+
+  get maxTrendTotal(): number {
+    return Math.max(1, ...(this.summary?.monthlyTrend || []).map((item: any) => Number(item.total) || 0));
+  }
+
+  trendBarHeight(value: number): string {
+    return `${Math.max(3, Math.round((Number(value) / this.maxTrendTotal) * 100))}%`;
+  }
+
+  monthLabel(value: string): string {
+    const date = new Date(`${value}-01T00:00:00`);
+    return new Intl.DateTimeFormat('en', { month: 'short' }).format(date);
   }
 
   openDetails(expense: ExpenseRecord): void {

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { EMPTY, Observable, expand, reduce } from 'rxjs';
+import { EMPTY, Observable, expand, reduce, switchMap, throwError } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 export interface ExpenseQuery {
@@ -14,6 +14,7 @@ export interface ExpenseQuery {
   limit?: number;
   sortBy?: string;
   sortDirection?: 'asc' | 'desc';
+  archived?: 'true' | 'all';
 }
 
 @Injectable({ providedIn: 'root' })
@@ -39,7 +40,59 @@ export class ExpenseService {
   }
 
   delete(id: string): Observable<any> {
-    return this.http.delete(`${this.baseUrl}/${id}`);
+    return this.http.patch(`${this.baseUrl}/${id}/archive`, {});
+  }
+
+  restore(id: string): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/${id}/restore`, {});
+  }
+
+  recordPayment(id: string, data: {
+    amount: number;
+    paymentMethod: string;
+    paymentDate: string;
+    reference: string;
+    notes: string;
+    requestId: string;
+  }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/${id}/payments`, data);
+  }
+
+  getRetention(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/retention`);
+  }
+
+  updateRetention(retentionMonths: number): Observable<any> {
+    return this.http.put(`${this.baseUrl}/retention`, { retentionMonths });
+  }
+
+  uploadReceipt(id: string, file: File): Observable<any> {
+    if (file.size > 8 * 1024 * 1024) {
+      return throwError(() => new Error('Receipt file must be 8 MB or smaller.'));
+    }
+    return this.http.post<any>(`${this.baseUrl}/${id}/receipt/upload-signature`, {
+      originalName: file.name
+    }).pipe(switchMap(upload => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('api_key', upload.apiKey);
+      formData.append('signature', upload.signature);
+      Object.entries(upload.parameters || {}).forEach(([key, value]) => {
+        formData.append(key, String(value));
+      });
+      return this.http.post<any>(upload.uploadUrl, formData).pipe(
+        switchMap(asset => this.http.post(`${this.baseUrl}/${id}/receipt`, {
+          publicId: asset.public_id,
+          resourceType: asset.resource_type,
+          format: asset.format,
+          originalName: file.name
+        }))
+      );
+    }));
+  }
+
+  receiptUrl(id: string): Observable<any> {
+    return this.http.get(`${this.baseUrl}/${id}/receipt`);
   }
 
   categories(): Observable<any> {

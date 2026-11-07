@@ -14,7 +14,6 @@ import { Payments } from './pages/payments/payments';
 import { TrainersStaff } from './pages/trainers-staff/trainers-staff';
 import { Reports } from './pages/reports/reports';
 import { BusinessSettings } from './pages/settings/settings';
-import { SubscriptionPage } from './pages/subscription/subscription';
 import { ExpiringMember, MembershipExpiry } from './pages/membership-expiry/membership-expiry';
 import { ExpenseTracker } from './pages/expenses/expense-tracker';
 import { DatabaseStorage } from './pages/database-storage/database-storage';
@@ -35,7 +34,6 @@ import { environment } from '../environments/environment';
     TrainersStaff,
     Reports,
     BusinessSettings,
-    SubscriptionPage,
     MembershipExpiry,
     ExpenseTracker,
     DatabaseStorage
@@ -119,8 +117,7 @@ export class App implements OnInit, OnDestroy {
       title: 'SYSTEM',
       items: [
         { name: 'Settings', icon: '⚙' },
-        { name: 'Database Storage', icon: '▦' },
-        { name: 'Subscription', icon: '◇' }
+        { name: 'Database Storage', icon: '▦' }
       ]
     }
   ];

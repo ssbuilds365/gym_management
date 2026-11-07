@@ -20,6 +20,11 @@ const paymentEntrySchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  requestId: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   notes: {
     type: String,
     trim: true,
@@ -81,6 +86,10 @@ const expenseSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  dueDate: {
+    type: Date,
+    default: null
+  },
   vendor: {
     type: String,
     trim: true,
@@ -105,6 +114,20 @@ const expenseSchema = new mongoose.Schema({
     maxlength: 2000,
     default: ''
   },
+  notes: {
+    type: String,
+    trim: true,
+    maxlength: 2000,
+    default: ''
+  },
+  receipt: {
+    publicId: { type: String, trim: true, default: '' },
+    format: { type: String, trim: true, default: '' },
+    resourceType: { type: String, enum: ['image', 'raw'], default: 'image' },
+    originalName: { type: String, trim: true, default: '' },
+    uploadedAt: { type: Date, default: null },
+    uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Owner', default: null }
+  },
   payments: {
     type: [paymentEntrySchema],
     default: []
@@ -127,10 +150,20 @@ const expenseSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Owner',
     default: null
+  },
+  archivedAt: {
+    type: Date,
+    default: null
+  },
+  archivedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Owner',
+    default: null
   }
 }, { timestamps: true });
 
 expenseSchema.index({ tenantId: 1, deletedAt: 1, expenseDate: -1, createdAt: -1 });
+expenseSchema.index({ tenantId: 1, archivedAt: 1, deletedAt: 1, expenseDate: -1 });
 expenseSchema.index({ tenantId: 1, deletedAt: 1, category: 1, expenseDate: -1 });
 expenseSchema.index({ tenantId: 1, deletedAt: 1, status: 1, expenseDate: -1 });
 expenseSchema.index({ tenantId: 1, deletedAt: 1, vendor: 1, expenseDate: -1 });

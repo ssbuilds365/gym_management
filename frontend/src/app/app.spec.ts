@@ -81,4 +81,21 @@ describe('App', () => {
 
     expect(fixture.nativeElement.querySelector('h1')?.textContent).toContain('Dashboard');
   });
+
+  it('keeps only Settings and Database Storage in System navigation', () => {
+    const fixture = TestBed.createComponent(App);
+    const systemGroup = fixture.componentInstance.menuGroups.find(group => group.title === 'SYSTEM');
+
+    expect(systemGroup?.items.map(item => item.name)).toEqual(['Settings', 'Database Storage']);
+  });
+
+  it('does not render owner subscription status or view-subscription links', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).not.toContain('Subscription Status');
+    expect(fixture.nativeElement.textContent).not.toContain('View Subscription');
+  });
 });

@@ -103,7 +103,4 @@ export class ManagementService {
     return this.http.put(`${this.baseUrl}/business/settings`, data);
   }
 
-  getSubscription(): Observable<any> {
-    return this.http.get(`${this.baseUrl}/business/subscription`);
-  }
 }

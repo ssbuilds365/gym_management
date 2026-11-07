@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
+const cloudinary = require('cloudinary').v2;
 const ExcelJS = require('exceljs');
+const config = require('../config/env');
 const Business = require('../models/Business');
 const Expense = require('../models/Expense');
 const ExpenseAudit = require('../models/ExpenseAudit');
@@ -18,6 +20,14 @@ const {
   resolveReportPeriod
 } = require('../utils/reportPeriods');
 const { DEFAULT_TIME_ZONE } = require('../utils/membershipExpiry');
+const { getLocalDateParts, localDateTimeToUtc } = require('../utils/dashboardPeriods');
+
+cloudinary.config({
+  cloud_name: config.cloudinary.cloudName,
+  api_key: config.cloudinary.apiKey,
+  api_secret: config.cloudinary.apiSecret,
+  secure: true
+});
 
 const VALID_STATUSES = ['PAID', 'PENDING', 'PARTIALLY_PAID'];
 const SORT_FIELDS = {
@@ -31,9 +41,18 @@ const SORT_FIELDS = {
 const validId = id => mongoose.Types.ObjectId.isValid(id);
 const normalizedName = name => String(name || '').trim().toLocaleLowerCase('en');
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const RECEIPT_FORMATS = new Set(['pdf', 'jpg', 'jpeg', 'png']);
+const MAX_RECEIPT_BYTES = 8 * 1024 * 1024;
+const cloudinaryConfigured = () => Boolean(
+  config.cloudinary.cloudName && config.cloudinary.apiKey && config.cloudinary.apiSecret
+);
+const sanitizedFileName = value => String(value || '')
+  .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+  .trim()
+  .slice(0, 150);
 
 const getBusiness = req => Business.findById(req.tenantId)
-  .select('timeZone businessName logoUrl')
+  .select('timeZone businessName logoUrl expenseRetentionMonths')
   .lean();
 
 const getBusinessTimeZone = business =>
@@ -52,7 +71,17 @@ const resolveRange = (query, timeZone) => {
 };
 
 const buildExpenseFilter = ({ tenantId, businessId, query, range }) => {
-  const filter = { tenantId, businessId, deletedAt: null };
+  const filter = { tenantId, businessId };
+  if (query.archived === 'true') {
+    const archivedFilter = { $or: [
+      { archivedAt: { $ne: null } },
+      { deletedAt: { $ne: null } }
+    ] };
+    filter.$and = [archivedFilter];
+  } else if (query.archived !== 'all') {
+    filter.archivedAt = null;
+    filter.deletedAt = null;
+  }
   if (range) filter.expenseDate = { $gte: range.from, $lt: range.toExclusive };
 
   if (query.category) filter.category = String(query.category).trim().slice(0, 80);
@@ -62,18 +91,23 @@ const buildExpenseFilter = ({ tenantId, businessId, query, range }) => {
   const search = String(query.search || '').trim().slice(0, 100);
   if (search) {
     const expression = new RegExp(escapeRegex(search), 'i');
-    filter.$or = [
+    const searchFilter = { $or: [
       { title: expression },
       { category: expression },
       { vendor: expression },
       { invoiceNumber: expression },
       { transactionReference: expression }
-    ];
+    ] };
+    if (filter.$and) {
+      filter.$and.push(searchFilter);
+    } else {
+      filter.$or = searchFilter.$or;
+    }
   }
   return filter;
 };
 
-const parseCreateData = (body, timeZone, actorId) => {
+const parseCreateData = (body, timeZone) => {
   const title = String(body.title || '').trim();
   const category = String(body.category || '').trim();
   const amountMinor = toMinorUnits(body.amount);
@@ -83,47 +117,25 @@ const parseCreateData = (body, timeZone, actorId) => {
   if (amountMinor === null) return { error: 'Enter an amount greater than zero with no more than two decimal places' };
   if (!expenseDate) return { error: 'Enter a valid expense date' };
 
-  const status = String(body.status || 'PENDING');
-  if (!VALID_STATUSES.includes(status)) return { error: 'Select a valid payment status' };
-  const paidAmountMinor = status === 'PAID'
-    ? amountMinor
-    : status === 'PENDING'
-      ? 0
-      : toMinorUnits(body.paidAmount);
-  if (paidAmountMinor === null || paidAmountMinor < 0 || paidAmountMinor > amountMinor) {
-    return { error: 'Paid amount must be greater than zero and cannot exceed the expense amount' };
-  }
-  if (deriveExpenseStatus(amountMinor, paidAmountMinor) !== status) {
-    return { error: 'Paid amount does not match the selected payment status' };
-  }
-  const paymentMethod = String(body.paymentMethod || '');
-  if (!PAYMENT_METHODS.includes(paymentMethod)) {
-    return { error: 'Select a valid payment method' };
-  }
+  const dueDate = body.dueDate ? parseExpenseDate(body.dueDate, timeZone) : null;
+  if (body.dueDate && !dueDate) return { error: 'Enter a valid due date' };
 
   return {
     data: {
       title,
       category,
       amountMinor,
-      paidAmountMinor,
-      status,
-      paymentMethod,
+      paidAmountMinor: 0,
+      status: 'PENDING',
+      paymentMethod: null,
       expenseDate,
+      dueDate,
       vendor: String(body.vendor || '').trim().slice(0, 120),
       invoiceNumber: String(body.invoiceNumber || '').trim().slice(0, 80),
       transactionReference: String(body.transactionReference || '').trim().slice(0, 120),
       description: String(body.description || '').trim().slice(0, 2000),
-      payments: paidAmountMinor > 0
-        ? [{
-            amountMinor: paidAmountMinor,
-            paymentMethod,
-            paidAt: new Date(),
-            reference: String(body.transactionReference || '').trim().slice(0, 120),
-            notes: '',
-            recordedBy: actorId
-          }]
-        : []
+      notes: String(body.notes || '').trim().slice(0, 2000),
+      payments: []
     }
   };
 };
@@ -141,11 +153,11 @@ const categoryExists = async (tenantId, name) => {
 
 const resolveSummary = async ({ tenantId, businessId, query, selectedRange, timeZone, now }) => {
   const selectedFilter = buildExpenseFilter({
-    tenantId, businessId, query, range: selectedRange
+    tenantId, businessId, query: { ...query, archived: 'all' }, range: selectedRange
   });
   const monthRange = resolveReportPeriod({ period: 'month', timezone: timeZone }, now);
   const todayRange = resolveReportPeriod({ period: 'today', timezone: timeZone }, now);
-  const base = { tenantId, businessId, deletedAt: null };
+  const base = { tenantId, businessId };
   const group = {
     _id: null,
     totalMinor: { $sum: '$amountMinor' },
@@ -155,29 +167,73 @@ const resolveSummary = async ({ tenantId, businessId, query, selectedRange, time
     { $match: filter },
     { $group: group }
   ]);
-  const [selected, month, today, categories] = await Promise.all([
+  const currentLocal = getLocalDateParts(now, timeZone);
+  const trendStart = new Date(Date.UTC(currentLocal.year, currentLocal.month - 12, 1));
+  const trendEnd = localDateTimeToUtc({
+    year: currentLocal.year,
+    month: currentLocal.month + 1,
+    day: 1
+  }, timeZone);
+  const trendFrom = localDateTimeToUtc({
+    year: trendStart.getUTCFullYear(),
+    month: trendStart.getUTCMonth() + 1,
+    day: 1
+  }, timeZone);
+  const trendFilter = buildExpenseFilter({
+    tenantId,
+    businessId,
+    query: { ...query, period: undefined, from: undefined, to: undefined, archived: 'all' },
+    range: { from: trendFrom, toExclusive: trendEnd }
+  });
+  const [selected, month, today, categoryRows, totalRecords, monthlyRows] = await Promise.all([
     summarize(selectedFilter),
     summarize({ ...base, expenseDate: { $gte: monthRange.from, $lt: monthRange.toExclusive } }),
     summarize({ ...base, expenseDate: { $gte: todayRange.from, $lt: todayRange.toExclusive } }),
     Expense.aggregate([
       { $match: selectedFilter },
       { $group: { _id: '$category', totalMinor: { $sum: '$amountMinor' } } },
-      { $sort: { totalMinor: -1, _id: 1 } },
-      { $limit: 1 }
+      { $sort: { totalMinor: -1, _id: 1 } }
+    ]),
+    Expense.countDocuments(selectedFilter),
+    Expense.aggregate([
+      { $match: trendFilter },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: '$expenseDate', timezone: timeZone } },
+          totalMinor: { $sum: '$amountMinor' }
+        }
+      },
+      { $sort: { _id: 1 } }
     ])
   ]);
   const selectedTotals = selected[0] || { totalMinor: 0, paidMinor: 0 };
   const monthTotals = month[0] || { totalMinor: 0 };
   const todayTotals = today[0] || { totalMinor: 0 };
+  const monthlyTotals = new Map(monthlyRows.map(row => [row._id, row.totalMinor]));
+  const monthlyTrend = [];
+  for (let offset = 11; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(currentLocal.year, currentLocal.month - 1 - offset, 1));
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    monthlyTrend.push({
+      month: key,
+      total: (monthlyTotals.get(key) || 0) / 100
+    });
+  }
   return {
+    totalRecords,
     totalExpenses: selectedTotals.totalMinor / 100,
     paidExpenses: selectedTotals.paidMinor / 100,
     pendingExpenses: Math.max(0, selectedTotals.totalMinor - selectedTotals.paidMinor) / 100,
     thisMonthExpenses: monthTotals.totalMinor / 100,
     todayExpenses: todayTotals.totalMinor / 100,
-    highestExpenseCategory: categories[0]
-      ? { name: categories[0]._id, amount: categories[0].totalMinor / 100 }
-      : null
+    highestExpenseCategory: categoryRows[0]
+      ? { name: categoryRows[0]._id, amount: categoryRows[0].totalMinor / 100 }
+      : null,
+    categories: categoryRows.map(row => ({
+      name: row._id,
+      amount: row.totalMinor / 100
+    })),
+    monthlyTrend
   };
 };
 
@@ -249,8 +305,7 @@ exports.getExpense = async (req, res) => {
     const expense = await Expense.findOne({
       _id: req.params.id,
       tenantId: req.tenantId,
-      businessId: req.owner.businessId,
-      deletedAt: null
+      businessId: req.owner.businessId
     }).lean();
     if (!expense) return res.status(404).json({ success: false, message: 'Expense not found' });
     return res.json({ success: true, expense: serializeExpense(expense) });
@@ -265,7 +320,7 @@ exports.createExpense = async (req, res) => {
   try {
     const business = await getBusiness(req);
     if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
-    const { data, error } = parseCreateData(req.body, getBusinessTimeZone(business), req.owner._id);
+    const { data, error } = parseCreateData(req.body, getBusinessTimeZone(business));
     if (error) return res.status(400).json({ success: false, message: error });
     if (!await categoryExists(req.tenantId, data.category)) {
       return res.status(400).json({ success: false, message: 'Select an active expense category' });
@@ -309,10 +364,11 @@ exports.updateExpense = async (req, res) => {
       _id: req.params.id,
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
+      archivedAt: null,
       deletedAt: null
     };
     let updated;
-    let action = 'UPDATED';
+    const action = 'UPDATED';
     await session.withTransaction(async () => {
       const expense = await Expense.findOne(filter).session(session);
       if (!expense) return;
@@ -342,43 +398,24 @@ exports.updateExpense = async (req, res) => {
         if (!expenseDate) throw Object.assign(new Error('Enter a valid expense date'), { status: 400 });
         expense.expenseDate = expenseDate;
       }
+      if (body.dueDate !== undefined) {
+        const dueDate = body.dueDate
+          ? parseExpenseDate(body.dueDate, getBusinessTimeZone(business))
+          : null;
+        if (body.dueDate && !dueDate) throw Object.assign(new Error('Enter a valid due date'), { status: 400 });
+        expense.dueDate = dueDate;
+      }
       for (const [field, maxLength] of [
         ['vendor', 120],
         ['invoiceNumber', 80],
         ['transactionReference', 120],
-        ['description', 2000]
+        ['description', 2000],
+        ['notes', 2000]
       ]) {
         if (body[field] !== undefined) expense[field] = String(body[field] || '').trim().slice(0, maxLength);
       }
       if (body.paymentAmount !== undefined && Number(body.paymentAmount) !== 0) {
-        const paymentAmountMinor = toMinorUnits(body.paymentAmount);
-        const paymentMethod = String(body.paymentMethod || '');
-        if (
-          paymentAmountMinor === null ||
-          paymentAmountMinor > expense.amountMinor - expense.paidAmountMinor
-        ) {
-          throw Object.assign(new Error('Additional payment must be positive and cannot exceed the outstanding amount'), { status: 400 });
-        }
-        if (!PAYMENT_METHODS.includes(paymentMethod)) {
-          throw Object.assign(new Error('Select a valid payment method'), { status: 400 });
-        }
-        expense.paidAmountMinor += paymentAmountMinor;
-        expense.paymentMethod = paymentMethod;
-        expense.payments.push({
-          amountMinor: paymentAmountMinor,
-          paymentMethod,
-          paidAt: new Date(),
-          reference: String(body.paymentReference || '').trim().slice(0, 120),
-          notes: String(body.paymentNotes || '').trim().slice(0, 500),
-          recordedBy: req.owner._id
-        });
-        action = 'PAYMENT_RECORDED';
-      } else if (body.paymentMethod !== undefined) {
-        const paymentMethod = String(body.paymentMethod || '');
-        if (!PAYMENT_METHODS.includes(paymentMethod)) {
-          throw Object.assign(new Error('Select a valid payment method'), { status: 400 });
-        }
-        expense.paymentMethod = paymentMethod;
+        throw Object.assign(new Error('Record payments through the dedicated payment endpoint'), { status: 400 });
       }
       expense.status = deriveExpenseStatus(expense.amountMinor, expense.paidAmountMinor);
       if (body.status && body.status !== expense.status) {
@@ -408,42 +445,394 @@ exports.updateExpense = async (req, res) => {
   }
 };
 
-exports.deleteExpense = async (req, res) => {
+exports.archiveExpense = async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
   const session = await mongoose.startSession();
   try {
-    let deleted;
+    let archived;
     await session.withTransaction(async () => {
       const expense = await Expense.findOne({
         _id: req.params.id,
         tenantId: req.tenantId,
         businessId: req.owner.businessId,
+        archivedAt: null,
         deletedAt: null
       }).session(session);
       if (!expense) return;
       const before = expenseSnapshot(expense);
-      expense.deletedAt = new Date();
-      expense.deletedBy = req.owner._id;
+      expense.archivedAt = new Date();
+      expense.archivedBy = req.owner._id;
       expense.updatedBy = req.owner._id;
       await expense.save({ session });
       await ExpenseAudit.create([{
         tenantId: req.tenantId,
         businessId: req.owner.businessId,
         expenseId: expense._id,
-        action: 'DELETED',
+        action: 'ARCHIVED',
         actorId: req.owner._id,
         before,
-        after: null
+        after: expenseSnapshot(expense)
       }], { session });
-      deleted = true;
+      archived = expense;
     });
-    if (!deleted) return res.status(404).json({ success: false, message: 'Expense not found' });
-    return res.json({ success: true, message: 'Expense archived and removed from active totals' });
+    if (!archived) return res.status(404).json({ success: false, message: 'Active expense not found' });
+    return res.json({
+      success: true,
+      message: 'Expense archived. Its history and payment records are retained.',
+      expense: serializeExpense(archived)
+    });
   } catch (error) {
-    console.error('Delete expense error:', error);
-    return res.status(500).json({ success: false, message: 'Unable to delete expense' });
+    console.error('Archive expense error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to archive expense' });
   } finally {
     await session.endSession();
+  }
+};
+
+exports.deleteExpense = exports.archiveExpense;
+
+exports.restoreExpense = async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
+  const session = await mongoose.startSession();
+  try {
+    let restored;
+    await session.withTransaction(async () => {
+      const expense = await Expense.findOne({
+        _id: req.params.id,
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        $or: [
+          { archivedAt: { $ne: null } },
+          { deletedAt: { $ne: null } }
+        ]
+      }).session(session);
+      if (!expense) return;
+      const before = expenseSnapshot(expense);
+      expense.archivedAt = null;
+      expense.archivedBy = null;
+      expense.deletedAt = null;
+      expense.deletedBy = null;
+      expense.updatedBy = req.owner._id;
+      await expense.save({ session });
+      await ExpenseAudit.create([{
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        expenseId: expense._id,
+        action: 'RESTORED',
+        actorId: req.owner._id,
+        before,
+        after: expenseSnapshot(expense)
+      }], { session });
+      restored = expense;
+    });
+    if (!restored) return res.status(404).json({ success: false, message: 'Archived expense not found' });
+    return res.json({ success: true, expense: serializeExpense(restored) });
+  } catch (error) {
+    console.error('Restore expense error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to restore expense' });
+  } finally {
+    await session.endSession();
+  }
+};
+
+exports.recordExpensePayment = async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
+  const amountMinor = toMinorUnits(req.body?.amount);
+  const paymentMethod = String(req.body?.paymentMethod || '');
+  const requestId = String(req.body?.requestId || '');
+  if (amountMinor === null) {
+    return res.status(400).json({ success: false, message: 'Enter a payment amount greater than zero.' });
+  }
+  if (!PAYMENT_METHODS.includes(paymentMethod)) {
+    return res.status(400).json({ success: false, message: 'Select a valid payment method.' });
+  }
+  if (!/^[\w-]{16,80}$/.test(requestId)) {
+    return res.status(400).json({ success: false, message: 'A valid payment request ID is required.' });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    const business = await getBusiness(req);
+    if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
+    const paidAt = req.body.paymentDate
+      ? parseExpenseDate(req.body.paymentDate, getBusinessTimeZone(business))
+      : new Date();
+    if (!paidAt) return res.status(400).json({ success: false, message: 'Enter a valid payment date.' });
+
+    let updated;
+    let duplicate = false;
+    await session.withTransaction(async () => {
+      const expense = await Expense.findOne({
+        _id: req.params.id,
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        archivedAt: null,
+        deletedAt: null
+      }).session(session);
+      if (!expense) return;
+      const existingPayment = expense.payments.find(payment => payment.requestId === requestId);
+      if (existingPayment) {
+        const reference = String(req.body.reference || '').trim().slice(0, 120);
+        const notes = String(req.body.notes || '').trim().slice(0, 500);
+        if (
+          existingPayment.amountMinor !== amountMinor ||
+          existingPayment.paymentMethod !== paymentMethod ||
+          existingPayment.reference !== reference ||
+          existingPayment.notes !== notes ||
+          new Date(existingPayment.paidAt).getTime() !== paidAt.getTime()
+        ) {
+          throw Object.assign(new Error('This payment request ID was already used for a different payment.'), { status: 409 });
+        }
+        updated = expense;
+        duplicate = true;
+        return;
+      }
+
+      const outstandingMinor = expense.amountMinor - expense.paidAmountMinor;
+      if (amountMinor > outstandingMinor) {
+        throw Object.assign(new Error('Payment cannot exceed the outstanding amount.'), { status: 400 });
+      }
+      const before = expenseSnapshot(expense);
+      expense.paidAmountMinor += amountMinor;
+      expense.status = deriveExpenseStatus(expense.amountMinor, expense.paidAmountMinor);
+      expense.paymentMethod = paymentMethod;
+      expense.payments.push({
+        amountMinor,
+        paymentMethod,
+        paidAt,
+        reference: String(req.body.reference || '').trim().slice(0, 120),
+        notes: String(req.body.notes || '').trim().slice(0, 500),
+        recordedBy: req.owner._id,
+        requestId
+      });
+      expense.updatedBy = req.owner._id;
+      await expense.save({ session });
+      await ExpenseAudit.create([{
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        expenseId: expense._id,
+        action: 'PAYMENT_RECORDED',
+        actorId: req.owner._id,
+        before,
+        after: expenseSnapshot(expense)
+      }], { session });
+      updated = expense;
+    });
+    if (!updated) return res.status(404).json({ success: false, message: 'Active expense not found' });
+    return res.json({
+      success: true,
+      duplicate,
+      expense: serializeExpense(updated)
+    });
+  } catch (error) {
+    if (error.status === 400 || error.status === 409) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
+    console.error('Record expense payment error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to record expense payment' });
+  } finally {
+    await session.endSession();
+  }
+};
+
+exports.getExpenseRetention = async (req, res) => {
+  try {
+    const business = await getBusiness(req);
+    if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
+    return res.json({
+      success: true,
+      retentionMonths: business.expenseRetentionMonths || 12,
+      automaticDeletion: false
+    });
+  } catch (error) {
+    console.error('Get expense retention settings error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to load retention settings' });
+  }
+};
+
+exports.updateExpenseRetention = async (req, res) => {
+  const retentionMonths = Number(req.body?.retentionMonths);
+  if (!Number.isInteger(retentionMonths) || retentionMonths < 1 || retentionMonths > 120) {
+    return res.status(400).json({ success: false, message: 'Retention period must be between 1 and 120 months.' });
+  }
+  try {
+    const business = await Business.findOneAndUpdate(
+      { _id: req.tenantId },
+      { $set: { expenseRetentionMonths: retentionMonths } },
+      { new: true, runValidators: true }
+    ).select('expenseRetentionMonths').lean();
+    if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
+    return res.json({
+      success: true,
+      retentionMonths: business.expenseRetentionMonths,
+      automaticDeletion: false
+    });
+  } catch (error) {
+    console.error('Update expense retention settings error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to save retention settings' });
+  }
+};
+
+exports.createExpenseReceiptUpload = async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
+  if (!cloudinaryConfigured()) {
+    return res.status(503).json({ success: false, message: 'Receipt storage is not configured.' });
+  }
+  const originalName = sanitizedFileName(req.body?.originalName);
+  const extension = originalName.split('.').pop()?.toLowerCase();
+  if (!originalName || !RECEIPT_FORMATS.has(extension)) {
+    return res.status(400).json({ success: false, message: 'Upload a PDF, JPG, JPEG, or PNG receipt.' });
+  }
+  try {
+    const expense = await Expense.findOne({
+      _id: req.params.id,
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      archivedAt: null,
+      deletedAt: null
+    }).select('_id receipt').lean();
+    if (!expense) return res.status(404).json({ success: false, message: 'Active expense not found' });
+    if (expense.receipt?.publicId) {
+      return res.status(409).json({ success: false, message: 'A receipt is already attached to this expense.' });
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const publicId = `expense-receipts/${req.tenantId}/${expense._id}/${require('node:crypto').randomUUID()}`;
+    const parameters = {
+      allowed_formats: 'pdf,jpg,jpeg,png',
+      public_id: publicId,
+      timestamp,
+      type: 'authenticated'
+    };
+    return res.json({
+      success: true,
+      uploadUrl: `https://api.cloudinary.com/v1_1/${config.cloudinary.cloudName}/auto/upload`,
+      apiKey: config.cloudinary.apiKey,
+      cloudName: config.cloudinary.cloudName,
+      signature: cloudinary.utils.api_sign_request(parameters, config.cloudinary.apiSecret),
+      parameters,
+      maxBytes: MAX_RECEIPT_BYTES
+    });
+  } catch (error) {
+    console.error('Create expense receipt upload signature error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to authorize receipt upload' });
+  }
+};
+
+exports.attachExpenseReceipt = async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
+  if (!cloudinaryConfigured()) {
+    return res.status(503).json({ success: false, message: 'Receipt storage is not configured.' });
+  }
+  const { publicId, format, resourceType } = req.body || {};
+  const originalName = sanitizedFileName(req.body?.originalName);
+  const allowedResourceTypes = new Set(['image', 'raw']);
+  const publicIdPrefix = `expense-receipts/${req.tenantId}/${req.params.id}/`;
+  if (
+    typeof publicId !== 'string' ||
+    !publicId.startsWith(publicIdPrefix) ||
+    !RECEIPT_FORMATS.has(String(format || '').toLowerCase()) ||
+    !allowedResourceTypes.has(resourceType) ||
+    !originalName
+  ) {
+    return res.status(400).json({ success: false, message: 'Invalid uploaded receipt details.' });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let attached;
+    await session.withTransaction(async () => {
+      const expense = await Expense.findOne({
+        _id: req.params.id,
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        archivedAt: null,
+        deletedAt: null
+      }).session(session);
+      if (!expense) return;
+      if (expense.receipt?.publicId) {
+        throw Object.assign(new Error('A receipt is already attached to this expense.'), { status: 409 });
+      }
+
+      const verifiedAsset = await cloudinary.api.resource(publicId, undefined, {
+        resource_type: resourceType,
+        type: 'authenticated'
+      });
+      if (
+        verifiedAsset.public_id !== publicId ||
+        verifiedAsset.bytes > MAX_RECEIPT_BYTES ||
+        !RECEIPT_FORMATS.has(String(verifiedAsset.format || '').toLowerCase())
+      ) {
+        throw Object.assign(new Error('The uploaded file is not an allowed receipt.'), { status: 400 });
+      }
+
+      const before = expenseSnapshot(expense);
+      expense.receipt = {
+        publicId,
+        format: verifiedAsset.format,
+        resourceType,
+        originalName,
+        uploadedAt: new Date(),
+        uploadedBy: req.owner._id
+      };
+      expense.updatedBy = req.owner._id;
+      await expense.save({ session });
+      await ExpenseAudit.create([{
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        expenseId: expense._id,
+        action: 'UPDATED',
+        actorId: req.owner._id,
+        before,
+        after: expenseSnapshot(expense)
+      }], { session });
+      attached = expense;
+    });
+    if (!attached) return res.status(404).json({ success: false, message: 'Active expense not found' });
+    return res.json({ success: true, expense: serializeExpense(attached) });
+  } catch (error) {
+    if (error.status === 400 || error.status === 409) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
+    if (error.http_code === 404 || error.statusCode === 404) {
+      return res.status(400).json({ success: false, message: 'Uploaded receipt could not be verified.' });
+    }
+    console.error('Attach expense receipt error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to attach receipt' });
+  } finally {
+    await session.endSession();
+  }
+};
+
+exports.getExpenseReceipt = async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid expense ID' });
+  if (!cloudinaryConfigured()) {
+    return res.status(503).json({ success: false, message: 'Receipt storage is not configured.' });
+  }
+  try {
+    const expense = await Expense.findOne({
+      _id: req.params.id,
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      'receipt.publicId': { $ne: '' }
+    }).select('receipt').lean();
+    if (!expense?.receipt?.publicId) {
+      return res.status(404).json({ success: false, message: 'Expense receipt not found' });
+    }
+    const url = cloudinary.utils.private_download_url(
+      expense.receipt.publicId,
+      expense.receipt.format,
+      {
+        attachment: true,
+        expires_at: Math.floor(Date.now() / 1000) + 300,
+        resource_type: expense.receipt.resourceType || 'image',
+        type: 'authenticated'
+      }
+    );
+    return res.json({ success: true, url, expiresInSeconds: 300 });
+  } catch (error) {
+    console.error('Get expense receipt error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to create secure receipt link' });
   }
 };
 
@@ -557,7 +946,7 @@ exports.exportExpenses = async (req, res) => {
     const filter = buildExpenseFilter({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
-      query: req.query,
+      query: { ...req.query, archived: req.query.archived === 'true' ? 'true' : 'all' },
       range
     });
     const { sort } = getListParameters(req.query);
@@ -681,7 +1070,7 @@ exports.getExpenseReport = async (req, res) => {
     const filter = buildExpenseFilter({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
-      query: req.query,
+      query: { ...req.query, archived: req.query.archived === 'true' ? 'true' : 'all' },
       range
     });
     const [summary, categories, vendors, statuses] = await Promise.all([

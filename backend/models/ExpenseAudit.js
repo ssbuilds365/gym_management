@@ -18,7 +18,14 @@ const expenseAuditSchema = new mongoose.Schema({
   },
   action: {
     type: String,
-    enum: ['CREATED', 'UPDATED', 'PAYMENT_RECORDED', 'DELETED'],
+    enum: [
+      'CREATED',
+      'UPDATED',
+      'PAYMENT_RECORDED',
+      'ARCHIVED',
+      'RESTORED',
+      'CANCELLED'
+    ],
     required: true
   },
   actorId: {

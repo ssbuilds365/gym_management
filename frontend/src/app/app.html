@@ -89,15 +89,12 @@
     </nav>
 
     <div class="sidebar-bottom">
-      <div class="upgrade-card">
-        <div class="upgrade-icon">✦</div>
-        <h4>Subscription Status</h4>
-        <p>View the status configured for your business account.</p>
-        <button (click)="selectMenu('Subscription')">View Subscription →</button>
-      </div>
-
       <div class="sidebar-footer">
-        <span>{{ appName }} v{{ appVersion }}</span>
+        <div class="footer-brand">
+          <span class="footer-logo">SS</span>
+          <strong>SS Fitness Manager</strong>
+        </div>
+        <span>Version {{ appVersion }}</span>
         <span>© 2026 SS Builds365</span>
       </div>
     </div>
@@ -498,16 +495,6 @@
         </section>
       } @error {
         <p class="module-load-error">Unable to load Database Storage.</p>
-      }
-    </div>
-
-    <div [hidden]="selectedMenu !== 'Subscription'">
-      @defer (when selectedMenu === 'Subscription') {
-        <app-subscription></app-subscription>
-      } @placeholder {
-        <section class="module-loading-skeleton" aria-label="Subscription loading"><div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div></section>
-      } @error {
-        <p class="module-load-error">Unable to load Subscription.</p>
       }
     </div>
 
