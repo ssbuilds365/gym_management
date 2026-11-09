@@ -347,7 +347,14 @@
         </ng-template>
       </div>
 
-      <app-membership-expiry (memberSelected)="openMemberFromExpiry($event)"></app-membership-expiry>
+      @defer (on idle) {
+        <app-membership-expiry (memberSelected)="openMemberFromExpiry($event)"></app-membership-expiry>
+      } @placeholder {
+        <div class="panel dashboard-panel-skeleton" role="status" aria-label="Loading membership expiry">
+          <div class="skeleton-line skeleton-title"></div>
+          <div class="skeleton-card"></div>
+        </div>
+      }
 
       <div class="panel members-panel" *ngIf="!dashboardError">
         <div class="panel-header">

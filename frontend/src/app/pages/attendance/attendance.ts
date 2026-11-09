@@ -13,10 +13,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
-import {
-  BrowserMultiFormatReader,
-  IScannerControls
-} from '@zxing/browser';
+import type { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 
 import { AttendanceService } from '../../services/attendance';
 import { MemberService } from '../../services/member';
@@ -60,9 +57,10 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   qrScanning = false;
   qrProcessing = false;
 
-  private codeReader = new BrowserMultiFormatReader();
+  private codeReader?: BrowserMultiFormatReader;
   private scannerControls?: IScannerControls;
   private scanLocked = false;
+  private scannerStartToken = 0;
 
   constructor(
     private attendanceService: AttendanceService,
@@ -227,6 +225,9 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   // Start camera scanner
   async startQRScanner(): Promise<void> {
+    if (this.qrScanning) return;
+
+    const startToken = ++this.scannerStartToken;
     try {
       if (!this.qrVideo?.nativeElement) {
         this.errorMessage = 'Scanner camera is not ready. Please try again.';
@@ -237,6 +238,9 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
       this.qrScanning = true;
       this.changeDetector.markForCheck();
 
+      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      if (startToken !== this.scannerStartToken || !this.qrScannerOpen) return;
+      this.codeReader ??= new BrowserMultiFormatReader();
       this.scannerControls =
         await this.codeReader.decodeFromVideoDevice(
           undefined,
@@ -300,6 +304,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   // Stop camera
   stopQRScanner(): void {
+    this.scannerStartToken++;
     if (this.scannerControls) {
       this.scannerControls.stop();
       this.scannerControls = undefined;
