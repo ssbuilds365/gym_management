@@ -71,6 +71,14 @@ const memberSchema = new mongoose.Schema(
             default: null
         },
 
+        additionalTrainerIds: {
+            type: [{
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'TrainerStaff'
+            }],
+            default: []
+        },
+
         deletedAt: {
             type: Date,
             default: null,

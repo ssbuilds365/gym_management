@@ -21,6 +21,12 @@ const memberMembershipSchema = new mongoose.Schema(
       required: true
     },
 
+    attributedTrainerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TrainerStaff',
+      default: null
+    },
+
     planId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MembershipPlan',
@@ -103,6 +109,7 @@ memberMembershipSchema.index({
   createdAt: -1
 });
 memberMembershipSchema.index({ tenantId: 1, status: 1 });
+memberMembershipSchema.index({ tenantId: 1, attributedTrainerId: 1, status: 1, startDate: -1 });
 memberMembershipSchema.index(
   { businessId: 1, invoiceNumber: 1 },
   { unique: true, partialFilterExpression: { invoiceNumber: { $type: 'string' } } }

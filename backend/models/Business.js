@@ -1,5 +1,13 @@
 const mongoose = require('mongoose');
 
+const logoStorageSchema = new mongoose.Schema({
+  publicId: { type: String, trim: true, default: '' },
+  format: { type: String, enum: ['webp'], default: 'webp' },
+  width: { type: Number, min: 1, max: 300 },
+  height: { type: Number, min: 1, max: 300 },
+  bytes: { type: Number, min: 1, max: 102400 }
+}, { _id: false });
+
 const businessSchema = new mongoose.Schema(
   {
     businessName: {
@@ -59,6 +67,11 @@ const businessSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: ''
+    },
+
+    logoStorage: {
+      type: logoStorageSchema,
+      default: null
     },
 
     gstEnabled: {

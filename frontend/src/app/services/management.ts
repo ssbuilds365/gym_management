@@ -42,12 +42,51 @@ export class ManagementService {
     return this.http.get(`${this.baseUrl}/trainers-staff/${id}/assignments`);
   }
 
-  assignMemberToTrainer(id: string, memberId: string): Observable<any> {
-    return this.http.post(`${this.baseUrl}/trainers-staff/${id}/assignments`, { memberId });
+  assignMemberToTrainer(
+    id: string,
+    memberId: string,
+    assignmentRole: 'Primary' | 'Additional' = 'Primary',
+    trainingType: 'General' | 'Personal Training' = 'General',
+    capacityOverrideConfirmed = false
+  ): Observable<any> {
+    return this.http.post(`${this.baseUrl}/trainers-staff/${id}/assignments`, {
+      memberId,
+      assignmentRole,
+      trainingType,
+      capacityOverrideConfirmed
+    });
   }
 
   removeTrainerAssignment(id: string, memberId: string): Observable<any> {
     return this.http.delete(`${this.baseUrl}/trainers-staff/${id}/assignments/${memberId}`);
+  }
+
+  getTrainerFinancialPerformance(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/trainers-staff/financial-performance`);
+  }
+
+  getTrainerPTPackages(trainerId: string, options: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  } = {}): Observable<any> {
+    let params = new HttpParams();
+    Object.entries(options).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') params = params.set(key, value);
+    });
+    return this.http.get(`${this.baseUrl}/trainers-staff/${trainerId}/pt-packages`, { params });
+  }
+
+  createTrainerPTPackage(trainerId: string, data: object): Observable<any> {
+    return this.http.post(`${this.baseUrl}/trainers-staff/${trainerId}/pt-packages`, data);
+  }
+
+  recordTrainerPTPayment(packageId: string, data: object): Observable<any> {
+    return this.http.post(`${this.baseUrl}/trainers-staff/pt-packages/${packageId}/payments`, data);
+  }
+
+  refundTrainerPTPayment(paymentId: string, data: object): Observable<any> {
+    return this.http.post(`${this.baseUrl}/trainers-staff/pt-payments/${paymentId}/refunds`, data);
   }
 
   getTrainerStaffReport(filters: {
@@ -101,6 +140,16 @@ export class ManagementService {
 
   updateSettings(data: object): Observable<any> {
     return this.http.put(`${this.baseUrl}/business/settings`, data);
+  }
+
+  uploadBusinessLogo(file: File): Observable<any> {
+    return this.http.post(`${this.baseUrl}/business/settings/logo`, file, {
+      headers: { 'Content-Type': file.type }
+    });
+  }
+
+  removeBusinessLogo(): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/business/settings/logo`);
   }
 
 }

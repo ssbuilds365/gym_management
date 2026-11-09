@@ -8,9 +8,24 @@ label { display: grid; gap: 7px; font-size: 12px; color: #555; }
 input, select, textarea { width: 100%; padding: 11px; border: 1px solid #ddd; border-radius: 7px; font: inherit; }
 .wide { grid-column: 1 / -1; }
 .primary-btn { justify-self: start; border: 0; border-radius: 7px; background: #e53935; color: #fff; padding: 11px 16px; cursor: pointer; }
+.primary-btn:disabled { opacity: .6; cursor: not-allowed; }
 .success { color: #16794b; }
 .error { color: #b42318; }
 @media (max-width: 650px) { .settings-panel { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+.logo-upload { display: grid; gap: 12px; padding: 14px; border: 1px solid #eceef3; border-radius: 9px; background: #fcfcfe; }
+.logo-upload-copy, .logo-preview-row, .logo-upload-actions { display: flex; align-items: center; gap: 14px; }
+.logo-upload-copy { justify-content: space-between; }
+.logo-upload h3 { margin: 0 0 5px; color: #252a3b; font-size: 14px; }
+.logo-upload p { margin: 0; color: #73798a; font-size: 11px; line-height: 1.5; }
+.logo-file-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; padding: 9px 12px; border: 1px solid #dfe2eb; border-radius: 7px; background: #fff; color: #34394a; font-size: 12px; font-weight: 700; cursor: pointer; }
+.logo-file-button input { display: none; }
+.logo-preview-row { min-height: 68px; padding-top: 10px; border-top: 1px solid #eceef3; }
+.logo-preview-row img { width: 64px; height: 64px; object-fit: contain; border: 1px solid #e6e8ed; border-radius: 7px; background: #fff; }
+.logo-file-details { display: grid; gap: 5px; color: #34394a; font-size: 11px; }
+.logo-file-details small, .logo-message { color: #73798a; font-size: 11px; }
+.logo-upload-actions { gap: 9px; }
+.logo-remove-btn { border: 1px solid #f0cbcb; border-radius: 7px; background: #fff; color: #a4262c; padding: 10px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.logo-remove-btn:disabled { opacity: .6; cursor: not-allowed; }
 .gst-settings { border-top: 1px solid #eee; padding-top: 20px; }
 .gst-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .gst-heading h3 { margin: 0 0 5px; font-size: 16px; }
@@ -53,6 +68,9 @@ input, select, textarea { width: 100%; padding: 11px; border: 1px solid #ddd; bo
 .password-actions .secondary-btn { padding: 11px 16px; }
 @media (max-width: 650px) {
   .security-panel { padding: 18px; }
+  .logo-upload-copy { align-items: flex-start; flex-direction: column; }
+  .logo-preview-row { align-items: flex-start; }
+  .logo-upload-actions { flex-wrap: wrap; }
   .security-heading { flex-direction: column; }
   .session-item { align-items: flex-start; }
   .security-actions { flex-direction: column; }

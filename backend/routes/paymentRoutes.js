@@ -5,6 +5,7 @@ const { protectOwner } = require('../middleware/authMiddleware');
 
 const {
   createPayment,
+  getEligiblePaymentMembers,
   getAllPayments,
   getMemberPayments,
   getPaymentReceipt,
@@ -13,6 +14,7 @@ const {
 
 // Record new payment
 router.post('/', protectOwner, createPayment);
+router.get('/eligible-members', protectOwner, getEligiblePaymentMembers);
 
 // Get payment history of a specific member
 router.get('/member/:memberId', protectOwner, getMemberPayments);

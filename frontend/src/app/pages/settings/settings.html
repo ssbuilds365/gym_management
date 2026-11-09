@@ -17,7 +17,42 @@
     <label>Phone<input name="phone" [(ngModel)]="form.phone"></label>
     <label>Email<input type="email" name="email" [(ngModel)]="form.email"></label>
     <label class="wide">Address<textarea name="address" [(ngModel)]="form.address" rows="3"></textarea></label>
-    <label class="wide">Business logo URL (optional)<input type="url" name="logoUrl" [(ngModel)]="form.logoUrl" placeholder="https://..."></label>
+    <section class="logo-upload wide" aria-labelledby="logo-upload-title">
+      <div class="logo-upload-copy">
+        <div>
+          <h3 id="logo-upload-title">Business Logo</h3>
+          <p>JPG, PNG, or WebP · Original maximum 200 KB · Recommended compressed size 30–80 KB</p>
+        </div>
+        <label class="logo-file-button">
+          {{ logoPreview ? 'Change Logo' : 'Upload Logo' }}
+          <input #logoFileInput type="file" accept="image/jpeg,image/png,image/webp"
+            (change)="onLogoSelected($event)" aria-label="Upload business logo">
+        </label>
+      </div>
+      <div class="logo-preview-row" *ngIf="logoPreview || selectedLogoFile">
+        <img *ngIf="logoPreview" [src]="logoPreview" alt="Business logo preview">
+        <div class="logo-file-details" *ngIf="selectedLogoFile">
+          <span>Original: {{ kilobytes(logoOriginalBytes) }} KB</span>
+          <span>Compressed preview: {{ kilobytes(logoCompressedBytes) }} KB</span>
+          <small>Final server compression is revalidated before saving (maximum 100 KB).</small>
+        </div>
+        <span class="logo-file-details" *ngIf="!selectedLogoFile && logoStorage">
+          {{ logoStorage.width }} × {{ logoStorage.height }} px · {{ kilobytes(logoStorage.bytes) }} KB WebP
+        </span>
+      </div>
+      <div class="logo-upload-actions" *ngIf="selectedLogoFile || form.logoUrl">
+        <button type="button" class="primary-btn" (click)="uploadLogo()"
+          *ngIf="selectedLogoFile" [disabled]="logoUploading || saving">
+          {{ logoUploading ? 'Uploading…' : 'Save Logo' }}
+        </button>
+        <button type="button" class="logo-remove-btn" (click)="removeLogo()"
+          *ngIf="form.logoUrl" [disabled]="logoRemoving || logoUploading">
+          {{ logoRemoving ? 'Removing…' : 'Remove Logo' }}
+        </button>
+      </div>
+      <p class="logo-message" *ngIf="logoMessage" role="status">{{ logoMessage }}</p>
+      <p class="error" *ngIf="logoError" role="alert">{{ logoError }}</p>
+    </section>
 
     <section class="gst-settings wide">
       <div class="gst-heading">

@@ -1,5 +1,13 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  Input,
+  OnChanges,
+  OnDestroy,
+  OnInit,
+  SimpleChanges
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, Subscription } from 'rxjs';
 import { jsPDF } from 'jspdf';
@@ -13,6 +21,7 @@ interface TeamRecord {
   email: string;
   role: 'Trainer' | 'Staff';
   specialization?: string;
+  maxClientCapacity?: number | null;
   designation?: string;
   department?: string;
   joiningDate?: string;
@@ -28,12 +37,61 @@ interface TeamForm {
   phone: string;
   email: string;
   specialization: string;
+  maxClientCapacity: number | null;
   designation: string;
   department: string;
   joiningDate: string;
   salaryAmount: number | null;
   compensationType: 'Salary' | 'Commission';
   status: 'Active' | 'Inactive';
+}
+
+interface TrainerFinancialRow {
+  trainer: {
+    _id: string;
+    name: string;
+    status: 'Active' | 'Inactive';
+    specialization: string;
+  };
+  clients: {
+    totalUniqueAssigned: number;
+    activePTClients: number;
+  };
+  personalTraining: { expected: number; collected: number; pending: number };
+}
+
+interface TrainerPTPaymentRow {
+  _id: string;
+  amount: number;
+  refundedAmount: number;
+  netCollectedAmount: number;
+  paymentMethod: string;
+  paymentDate: string;
+  transactionReference: string;
+  status: string;
+}
+
+type TrainerPTTransactionStatus =
+  | 'PAID'
+  | 'PARTIAL PAID'
+  | 'REFUNDED'
+  | 'PARTIALLY REFUNDED'
+  | 'FAILED'
+  | 'PENDING';
+
+interface TrainerPTPackageRow {
+  _id: string;
+  memberId: { _id: string; fullName: string; phone: string } | string;
+  packageName: string;
+  packageType: string;
+  startDate: string;
+  endDate: string;
+  totalFee: number;
+  collectedAmount: number;
+  pendingAmount: number;
+  paymentStatus: string;
+  status: string;
+  payments: TrainerPTPaymentRow[];
 }
 
 const todayString = (): string => {
@@ -48,7 +106,8 @@ const todayString = (): string => {
   templateUrl: './trainers-staff.html',
   styleUrl: './trainers-staff.scss'
 })
-export class TrainersStaff implements OnInit, OnDestroy {
+export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
+  @Input() active = false;
   trainers: TeamRecord[] = [];
   staff: TeamRecord[] = [];
   trainerTotal = 0;
@@ -57,6 +116,12 @@ export class TrainersStaff implements OnInit, OnDestroy {
   staffMatchTotal = 0;
   activeTrainerTotal = 0;
   activeStaffTotal = 0;
+  financialLoading = false;
+  financialError = '';
+  financialSummary: Record<string, number> | null = null;
+  financialTrainers: TrainerFinancialRow[] = [];
+  financialLimitations: string[] = [];
+  ptDetailsPaymentId = '';
   trainerPage = 1;
   staffPage = 1;
   readonly pageSize = 10;
@@ -78,9 +143,30 @@ export class TrainersStaff implements OnInit, OnDestroy {
   staffForm = this.emptyForm();
   selectedRecord: TeamRecord | null = null;
   assignmentTrainer: TeamRecord | null = null;
-  assignedMembers: Array<{ _id: string; fullName: string; phone: string; email?: string; status: string }> = [];
+  assignedMembers: Array<{
+    _id: string;
+    fullName: string;
+    phone: string;
+    email?: string;
+    status: string;
+    assignmentRole?: 'Primary' | 'Additional';
+  }> = [];
   availableMembers: Array<{ _id: string; fullName: string; phone: string }> = [];
   selectedMemberId = '';
+  assignmentRole: 'Primary' | 'Additional' = 'Primary';
+  assignmentTrainingType: 'General' | 'Personal Training' = 'General';
+  ptTrainer: TeamRecord | null = null;
+  ptPackages: TrainerPTPackageRow[] = [];
+  ptPackagesLoading = false;
+  ptSaving = false;
+  ptError = '';
+  ptSuccess = '';
+  ptPackageForm = this.emptyPTPackageForm();
+  ptPaymentPackageId = '';
+  ptPaymentForm = this.emptyPTPaymentForm();
+  private ptPaymentRequestFingerprint = '';
+  ptRefundPaymentId = '';
+  ptRefundForm = this.emptyPTRefundForm();
   assignmentLoading = false;
   assigning = false;
   reportLoading = false;
@@ -109,6 +195,8 @@ export class TrainersStaff implements OnInit, OnDestroy {
   private readonly businessName = this.readBusinessName();
   private trainerRequest?: Subscription;
   private staffRequest?: Subscription;
+  private financialRequest?: Subscription;
+  private ptPackageRequest?: Subscription;
   private trainerSearchTimer?: ReturnType<typeof setTimeout>;
   private staffSearchTimer?: ReturnType<typeof setTimeout>;
   private pendingDirectoryRequests = 0;
@@ -122,6 +210,14 @@ export class TrainersStaff implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.load();
     this.loadReport();
+    this.loadFinancialPerformance();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['active'] && !changes['active'].firstChange && this.active) {
+      this.loadFinancialPerformance();
+      if (this.ptTrainer) this.loadPTPackages();
+    }
   }
 
   ngOnDestroy(): void {
@@ -129,6 +225,8 @@ export class TrainersStaff implements OnInit, OnDestroy {
     this.clearSearchTimer('Staff');
     this.trainerRequest?.unsubscribe();
     this.staffRequest?.unsubscribe();
+    this.financialRequest?.unsubscribe();
+    this.ptPackageRequest?.unsubscribe();
   }
 
   private emptyForm(): TeamForm {
@@ -137,6 +235,7 @@ export class TrainersStaff implements OnInit, OnDestroy {
       phone: '',
       email: '',
       specialization: '',
+      maxClientCapacity: null,
       designation: '',
       department: '',
       joiningDate: todayString(),
@@ -150,6 +249,143 @@ export class TrainersStaff implements OnInit, OnDestroy {
     this.errorMessage = '';
     this.loadDirectory('Trainer');
     this.loadDirectory('Staff');
+    this.loadFinancialPerformance();
+  }
+
+  loadFinancialPerformance(): void {
+    this.financialRequest?.unsubscribe();
+    this.financialLoading = true;
+    this.financialError = '';
+    this.financialRequest = this.management.getTrainerFinancialPerformance()
+      .pipe(finalize(() => {
+        this.financialLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          if (!response?.success) {
+            this.financialError = 'Unable to load trainer financial performance.';
+            this.financialSummary = null;
+            this.financialTrainers = [];
+            return;
+          }
+          this.financialSummary = response.summary || null;
+          this.financialTrainers = response.trainers || [];
+          this.financialLimitations = (response.limitations || [])
+            .filter((limitation: string) => !/membership attribution/i.test(limitation));
+        },
+        error: error => {
+          console.error('Trainer financial performance loading error:', error);
+          this.financialError = error.error?.message || 'Unable to load trainer financial performance.';
+          this.financialSummary = null;
+          this.financialTrainers = [];
+        }
+      });
+  }
+
+  formatCurrency(amount: number): string {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 2
+    }).format(Number(amount) || 0);
+  }
+
+  ptMemberName(ptPackage: TrainerPTPackageRow): string {
+    return typeof ptPackage.memberId === 'string'
+      ? 'Member'
+      : ptPackage.memberId.fullName || 'Member';
+  }
+
+  ptTransactionStatus(payment: TrainerPTPaymentRow): TrainerPTTransactionStatus {
+    if (payment.status === 'Failed') return 'FAILED';
+    if (payment.status === 'Pending') return 'PENDING';
+    if (payment.status === 'Partial' || payment.status === 'Partially Paid') return 'PARTIAL PAID';
+
+    const refunded = Number(payment.refundedAmount) || 0;
+    if (refunded > 0) {
+      return Number(payment.netCollectedAmount) > 0
+        ? 'PARTIALLY REFUNDED'
+        : 'REFUNDED';
+    }
+    return payment.status === 'Success' ? 'PAID' : 'PENDING';
+  }
+
+  ptTransactionStatusClass(payment: TrainerPTPaymentRow): string {
+    switch (this.ptTransactionStatus(payment)) {
+      case 'PAID':
+        return 'paid';
+      case 'PARTIAL PAID':
+        return 'partial';
+      case 'REFUNDED':
+      case 'PARTIALLY REFUNDED':
+        return 'refunded';
+      case 'FAILED':
+        return 'failed';
+      default:
+        return 'pending';
+    }
+  }
+
+  ptPackagePaymentStatus(status: string): 'PAID' | 'PARTIAL PAID' | 'PENDING' {
+    if (status === 'Paid') return 'PAID';
+    if (status === 'Partial') return 'PARTIAL PAID';
+    return 'PENDING';
+  }
+
+  ptPackagePaymentStatusClass(status: string): string {
+    if (status === 'Paid') return 'paid';
+    if (status === 'Partial') return 'partial';
+    return 'pending';
+  }
+
+  togglePTPaymentDetails(payment: TrainerPTPaymentRow): void {
+    this.ptDetailsPaymentId = this.ptDetailsPaymentId === payment._id ? '' : payment._id;
+  }
+
+  private emptyPTPackageForm(): {
+    memberId: string;
+    packageName: string;
+    packageType: string;
+    startDate: string;
+    endDate: string;
+    totalFee: number | null;
+    paymentFrequency: string;
+  } {
+    const today = todayString();
+    const nextMonth = new Date();
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    return {
+      memberId: '',
+      packageName: '',
+      packageType: 'Monthly',
+      startDate: today,
+      endDate: `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`,
+      totalFee: null,
+      paymentFrequency: 'Monthly'
+    };
+  }
+
+  private emptyPTPaymentForm(): {
+    amount: number | null;
+    paymentMethod: string;
+    transactionReference: string;
+    paymentDate: string;
+    notes: string;
+    requestId: string;
+  } {
+    return {
+      amount: null,
+      paymentMethod: 'Cash',
+      transactionReference: '',
+      paymentDate: todayString(),
+      notes: '',
+      requestId: ''
+    };
+  }
+
+  private emptyPTRefundForm(): { amount: number | null; refundReference: string; reason: string } {
+    return { amount: null, refundReference: '', reason: '' };
   }
 
   private loadDirectory(role: 'Trainer' | 'Staff'): void {
@@ -255,6 +491,7 @@ export class TrainersStaff implements OnInit, OnDestroy {
       phone: record.phone,
       email: record.email || '',
       specialization: record.specialization || '',
+      maxClientCapacity: record.maxClientCapacity ?? null,
       designation: record.designation || '',
       department: record.department || '',
       joiningDate: record.joiningDate ? String(record.joiningDate).slice(0, 10) : '',
@@ -378,13 +615,21 @@ export class TrainersStaff implements OnInit, OnDestroy {
     });
   }
 
-  assignMember(): void {
+  assignMember(capacityOverrideConfirmed = false): void {
     if (!this.assignmentTrainer || !this.selectedMemberId || this.assigning) return;
     this.assigning = true;
-    this.management.assignMemberToTrainer(this.assignmentTrainer._id, this.selectedMemberId)
+    let retryWithCapacityOverride = false;
+    this.management.assignMemberToTrainer(
+      this.assignmentTrainer._id,
+      this.selectedMemberId,
+      this.assignmentRole,
+      this.assignmentTrainingType,
+      capacityOverrideConfirmed
+    )
       .pipe(finalize(() => {
         this.assigning = false;
         this.changeDetector.markForCheck();
+        if (retryWithCapacityOverride) this.assignMember(true);
       }))
       .subscribe({
         next: () => {
@@ -396,6 +641,16 @@ export class TrainersStaff implements OnInit, OnDestroy {
         },
         error: error => {
           console.error('Member assignment error:', error);
+          if (
+            error.error?.code === 'TRAINER_CAPACITY_EXCEEDED' &&
+            !capacityOverrideConfirmed &&
+            window.confirm(
+              `${error.error.message}. This assignment exceeds the trainer's configured capacity. Override the limit?`
+            )
+          ) {
+            retryWithCapacityOverride = true;
+            return;
+          }
           this.errorMessage = error.error?.message || 'Unable to assign member.';
         }
       });
@@ -423,6 +678,161 @@ export class TrainersStaff implements OnInit, OnDestroy {
     this.assignmentTrainer = null;
     this.assignedMembers = [];
     this.selectedMemberId = '';
+  }
+
+  openPTPackages(trainer: TeamRecord): void {
+    this.ptTrainer = trainer;
+    this.ptPackages = [];
+    this.ptPackageForm = this.emptyPTPackageForm();
+    this.ptError = '';
+    this.ptSuccess = '';
+    this.loadPTPackages();
+    this.management.getTrainerAssignments(trainer._id)
+      .pipe(finalize(() => this.changeDetector.markForCheck()))
+      .subscribe({
+        next: response => {
+          this.availableMembers = (response.members || []).map((member: { _id: string; fullName: string; phone: string }) => ({
+            _id: member._id,
+            fullName: member.fullName,
+            phone: member.phone
+          }));
+        },
+        error: error => {
+          console.error('PT package member list error:', error);
+          this.ptError = error.error?.message || 'Unable to load members for PT packages.';
+        }
+      });
+  }
+
+  loadPTPackages(): void {
+    if (!this.ptTrainer) return;
+    this.ptPackageRequest?.unsubscribe();
+    this.ptPackagesLoading = true;
+    this.ptError = '';
+    const trainerId = this.ptTrainer._id;
+    this.ptPackageRequest = this.management.getTrainerPTPackages(trainerId)
+      .pipe(finalize(() => {
+        this.ptPackagesLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          if (this.ptTrainer?._id === trainerId) this.ptPackages = response.packages || [];
+        },
+        error: error => {
+          console.error('PT package loading error:', error);
+          this.ptError = error.error?.message || 'Unable to load PT packages.';
+        }
+      });
+  }
+
+  createPTPackage(): void {
+    if (!this.ptTrainer || this.ptSaving) return;
+    this.ptSaving = true;
+    this.ptError = '';
+    this.ptSuccess = '';
+    this.management.createTrainerPTPackage(this.ptTrainer._id, this.ptPackageForm)
+      .pipe(finalize(() => {
+        this.ptSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: () => {
+          this.ptSuccess = 'Personal training package created.';
+          this.ptPackageForm = this.emptyPTPackageForm();
+          this.loadPTPackages();
+          this.loadFinancialPerformance();
+        },
+        error: error => {
+          console.error('PT package creation error:', error);
+          this.ptError = error.error?.message || 'Unable to create PT package.';
+        }
+      });
+  }
+
+  startPTPayment(ptPackage: TrainerPTPackageRow): void {
+    this.ptPaymentPackageId = ptPackage._id;
+    this.ptPaymentRequestFingerprint = '';
+    this.ptPaymentForm = {
+      ...this.emptyPTPaymentForm(),
+      amount: ptPackage.pendingAmount
+    };
+  }
+
+  recordPTPayment(): void {
+    if (!this.ptPaymentPackageId || this.ptSaving) return;
+    const { requestId: _requestId, ...payload } = this.ptPaymentForm;
+    const fingerprint = JSON.stringify({ packageId: this.ptPaymentPackageId, ...payload });
+    if (!this.ptPaymentForm.requestId || this.ptPaymentRequestFingerprint !== fingerprint) {
+      this.ptPaymentForm.requestId = crypto.randomUUID();
+      this.ptPaymentRequestFingerprint = fingerprint;
+    }
+    this.ptSaving = true;
+    this.ptError = '';
+    this.ptSuccess = '';
+    this.management.recordTrainerPTPayment(this.ptPaymentPackageId, this.ptPaymentForm)
+      .pipe(finalize(() => {
+        this.ptSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: () => {
+          this.ptPaymentPackageId = '';
+          this.ptPaymentRequestFingerprint = '';
+          this.ptSuccess = 'PT payment recorded as successful.';
+          this.loadPTPackages();
+          this.loadFinancialPerformance();
+        },
+        error: error => {
+          console.error('PT payment recording error:', error);
+          this.ptError = error.error?.message || 'Unable to record PT payment.';
+        }
+      });
+  }
+
+  startPTRefund(payment: TrainerPTPaymentRow): void {
+    this.ptRefundPaymentId = payment._id;
+    this.ptRefundForm = {
+      amount: payment.netCollectedAmount,
+      refundReference: '',
+      reason: ''
+    };
+  }
+
+  recordPTRefund(): void {
+    if (!this.ptRefundPaymentId || this.ptSaving) return;
+    if (!confirm('Record a refund that has already been completed? This does not initiate a payment-provider refund.')) {
+      return;
+    }
+    this.ptSaving = true;
+    this.ptError = '';
+    this.ptSuccess = '';
+    this.management.refundTrainerPTPayment(this.ptRefundPaymentId, {
+      ...this.ptRefundForm,
+      confirmRefund: true
+    }).pipe(finalize(() => {
+      this.ptSaving = false;
+      this.changeDetector.markForCheck();
+    })).subscribe({
+      next: () => {
+        this.ptRefundPaymentId = '';
+        this.ptSuccess = 'Completed PT refund recorded.';
+        this.loadPTPackages();
+        this.loadFinancialPerformance();
+      },
+      error: error => {
+        console.error('PT refund recording error:', error);
+        this.ptError = error.error?.message || 'Unable to record PT refund.';
+      }
+    });
+  }
+
+  closePTPackages(): void {
+    this.ptTrainer = null;
+    this.ptPackages = [];
+    this.ptPaymentPackageId = '';
+    this.ptRefundPaymentId = '';
+    this.ptPackageRequest?.unsubscribe();
   }
 
   setReportPeriod(period: string): void {

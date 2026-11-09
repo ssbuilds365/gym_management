@@ -371,6 +371,11 @@ table {
   small {
     color: #888;
     font-size: 11px;
+
+    &.amount-validation {
+      color: #b42318;
+      font-weight: 600;
+    }
   }
 }
 

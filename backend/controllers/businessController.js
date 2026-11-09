@@ -1,4 +1,8 @@
 const Business = require('../models/Business');
+const cloudinary = require('cloudinary').v2;
+const { randomUUID } = require('node:crypto');
+const config = require('../config/env');
+const { compressBusinessLogo } = require('../utils/businessLogo');
 const {
   isValidGstin,
   isValidStateCode,
@@ -25,7 +29,44 @@ const businessFields = [
 ];
 const businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Other'];
 const settingsProjection =
-  'businessName businessType timeZone ownerName phone email address logoUrl subscriptionStatus gstEnabled gstinNumber legalBusinessName registeredBusinessAddress state stateCode gstPercentage taxInclusive';
+  'businessName businessType timeZone ownerName phone email address logoUrl logoStorage subscriptionStatus gstEnabled gstinNumber legalBusinessName registeredBusinessAddress state stateCode gstPercentage taxInclusive';
+
+cloudinary.config({
+  cloud_name: config.cloudinary.cloudName,
+  api_key: config.cloudinary.apiKey,
+  api_secret: config.cloudinary.apiSecret,
+  secure: true
+});
+
+const cloudinaryConfigured = () => Boolean(
+  config.cloudinary.cloudName && config.cloudinary.apiKey && config.cloudinary.apiSecret
+);
+
+const uploadLogoAsset = (buffer, tenantId) => new Promise((resolve, reject) => {
+  const publicId = `business-logos/${tenantId}/${randomUUID()}`;
+  const stream = cloudinary.uploader.upload_stream({
+    resource_type: 'image',
+    public_id: publicId,
+    format: 'webp',
+    overwrite: false,
+    secure: true
+  }, (error, result) => {
+    if (error) return reject(error);
+    return resolve(result);
+  });
+  stream.end(buffer);
+});
+
+const deleteLogoAsset = publicId => new Promise((resolve, reject) => {
+  if (!publicId) return resolve();
+  cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true }, (error, result) => {
+    if (error) return reject(error);
+    if (!result || !['ok', 'not found'].includes(result.result)) {
+      return reject(new Error('Cloudinary did not confirm logo removal'));
+    }
+    return resolve();
+  });
+});
 
 const validateGstSettings = (settings) => {
   if (typeof settings.gstEnabled !== 'boolean') {
@@ -191,6 +232,113 @@ exports.updateSettings = async (req, res) => {
       success: false,
       message: 'Unable to update business settings'
     });
+  }
+};
+
+exports.uploadBusinessLogo = async (req, res) => {
+  if (!cloudinaryConfigured()) {
+    return res.status(503).json({
+      success: false,
+      message: 'Business logo uploads are unavailable because image storage is not configured.'
+    });
+  }
+
+  let uploaded;
+  try {
+    const image = await compressBusinessLogo(req.body, req.get('Content-Type'));
+    const existing = await Business.findById(req.tenantId).select('logoStorage');
+    if (!existing) return res.status(404).json({ success: false, message: 'Business not found' });
+
+    uploaded = await uploadLogoAsset(image.buffer, req.tenantId);
+    if (!uploaded?.secure_url || uploaded.format !== 'webp' || uploaded.bytes > 100 * 1024) {
+      throw new Error('Cloudinary returned an invalid business logo asset');
+    }
+
+    const previousPublicId = existing.logoStorage?.publicId;
+    const business = await Business.findOneAndUpdate(
+      { _id: req.tenantId },
+      {
+        $set: {
+          logoUrl: uploaded.secure_url,
+          logoStorage: {
+            publicId: uploaded.public_id,
+            format: 'webp',
+            width: image.width,
+            height: image.height,
+            bytes: uploaded.bytes
+          }
+        }
+      },
+      { new: true, runValidators: true }
+    ).select(settingsProjection);
+
+    if (!business) throw new Error('Business profile was not updated');
+
+    let previousAssetCleanupPending = false;
+    if (previousPublicId && previousPublicId !== uploaded.public_id) {
+      try {
+        await deleteLogoAsset(previousPublicId);
+      } catch (cleanupError) {
+        previousAssetCleanupPending = true;
+        console.error('Previous business logo cleanup failed:', cleanupError);
+      }
+    }
+
+    return res.json({
+      success: true,
+      business,
+      compression: {
+        originalBytes: req.body.length,
+        compressedBytes: image.bytes,
+        width: image.width,
+        height: image.height,
+        format: image.format,
+        targetRangeMet: image.bytes >= 30 * 1024 && image.bytes <= 80 * 1024
+      },
+      previousAssetCleanupPending
+    });
+  } catch (error) {
+    if (uploaded?.public_id) {
+      try {
+        await deleteLogoAsset(uploaded.public_id);
+      } catch (cleanupError) {
+        console.error('Failed business logo upload cleanup:', cleanupError);
+      }
+    }
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    console.error('Business logo upload error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to save the business logo.' });
+  }
+};
+
+exports.removeBusinessLogo = async (req, res) => {
+  try {
+    const existing = await Business.findById(req.tenantId).select('logoStorage');
+    if (!existing) return res.status(404).json({ success: false, message: 'Business not found' });
+
+    const previousPublicId = existing.logoStorage?.publicId;
+    const business = await Business.findOneAndUpdate(
+      { _id: req.tenantId },
+      { $set: { logoUrl: '', logoStorage: null } },
+      { new: true, runValidators: true }
+    ).select(settingsProjection);
+    if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
+
+    let cleanupPending = false;
+    if (previousPublicId) {
+      try {
+        await deleteLogoAsset(previousPublicId);
+      } catch (error) {
+        cleanupPending = true;
+        console.error('Removed business logo asset cleanup failed:', error);
+      }
+    }
+    return res.json({ success: true, business, cleanupPending });
+  } catch (error) {
+    console.error('Business logo removal error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to remove the business logo.' });
   }
 };
 

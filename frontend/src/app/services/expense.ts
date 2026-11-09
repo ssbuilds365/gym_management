@@ -54,8 +54,10 @@ export class ExpenseService {
     reference: string;
     notes: string;
     requestId: string;
-  }): Observable<any> {
-    return this.http.post(`${this.baseUrl}/${id}/payments`, data);
+  }, query: ExpenseQuery = {}): Observable<any> {
+    return this.http.post(`${this.baseUrl}/${id}/payments`, data, {
+      params: this.toParams(query)
+    });
   }
 
   getRetention(): Observable<any> {

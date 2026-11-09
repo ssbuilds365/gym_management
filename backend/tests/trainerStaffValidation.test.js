@@ -9,6 +9,7 @@ test('trainer and staff validation normalizes profile data and compensation', ()
     email: 'ALEX@EXAMPLE.COM ',
     role: 'Trainer',
     specialization: '  Strength ',
+    maxClientCapacity: '24',
     joiningDate: '2026-04-15',
     salaryAmount: '1250.50',
     compensationType: 'Commission',
@@ -20,6 +21,7 @@ test('trainer and staff validation normalizes profile data and compensation', ()
   assert.equal(result.data.phone, '+1 (415) 555-0132');
   assert.equal(result.data.email, 'alex@example.com');
   assert.equal(result.data.specialization, 'Strength');
+  assert.equal(result.data.maxClientCapacity, 24);
   assert.equal(result.data.salaryAmount, 1250.5);
   assert.equal(result.data.compensationType, 'Commission');
   assert.equal(result.data.joiningDate.toISOString(), '2026-04-15T00:00:00.000Z');
@@ -41,5 +43,13 @@ test('trainer and staff validation rejects malformed contact and compensation fi
   assert.equal(
     validateTrainerStaffRecord({ joiningDate: 'not-a-date' }, false).error,
     'Enter a valid joining date'
+  );
+  assert.equal(
+    validateTrainerStaffRecord({ maxClientCapacity: 0 }, false).error,
+    'Maximum client capacity must be a positive whole number'
+  );
+  assert.equal(
+    validateTrainerStaffRecord({ maxClientCapacity: 1.5 }, false).error,
+    'Maximum client capacity must be a positive whole number'
   );
 });

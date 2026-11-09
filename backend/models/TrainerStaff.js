@@ -12,6 +12,7 @@ const trainerStaffSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true, default: '' },
     role: { type: String, enum: ['Trainer', 'Staff'], required: true },
     specialization: { type: String, trim: true, default: '', maxlength: 120 },
+    maxClientCapacity: { type: Number, min: 1, max: 10000, default: null },
     designation: { type: String, trim: true, default: '', maxlength: 120 },
     department: { type: String, trim: true, default: '', maxlength: 120 },
     joiningDate: { type: Date, default: Date.now },

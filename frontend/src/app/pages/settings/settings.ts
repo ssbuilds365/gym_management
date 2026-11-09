@@ -1,6 +1,6 @@
 import { ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import { ManagementService } from '../../services/management';
@@ -14,8 +14,9 @@ import { AuthService } from '../../services/auth';
   templateUrl: './settings.html',
   styleUrl: './settings.scss'
 })
-export class BusinessSettings implements OnInit {
+export class BusinessSettings implements OnInit, OnDestroy {
   @Output() businessUpdated = new EventEmitter<string>();
+  @Output() businessLogoUpdated = new EventEmitter<string>();
   @Output() loggedOut = new EventEmitter<void>();
   @Output() passwordChanged = new EventEmitter<void>();
 
@@ -23,6 +24,21 @@ export class BusinessSettings implements OnInit {
   saving = false;
   errorMessage = '';
   successMessage = '';
+  logoError = '';
+  logoMessage = '';
+  logoUploading = false;
+  logoRemoving = false;
+  logoOriginalBytes = 0;
+  logoCompressedBytes = 0;
+  logoPreviewUrl = '';
+  selectedLogoFile: File | null = null;
+  logoStorage: {
+    publicId: string;
+    format: string;
+    width: number;
+    height: number;
+    bytes: number;
+  } | null = null;
   sessionsLoading = false;
   sessionsSaving = false;
   sessionsError = '';
@@ -75,6 +91,10 @@ export class BusinessSettings implements OnInit {
   ngOnInit(): void {
     this.load();
     this.loadSessions();
+  }
+
+  ngOnDestroy(): void {
+    this.clearLogoPreview();
   }
 
   get hasOtherSessions(): boolean {
@@ -236,6 +256,171 @@ export class BusinessSettings implements OnInit {
     this.form.state = this.gstStates.find(item => item.code === stateCode)?.name || '';
   }
 
+  get logoPreview(): string {
+    return this.logoPreviewUrl || this.form.logoUrl;
+  }
+
+  async onLogoSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    this.logoError = '';
+    this.logoMessage = '';
+    this.clearLogoPreview();
+    this.selectedLogoFile = null;
+    this.logoOriginalBytes = 0;
+    this.logoCompressedBytes = 0;
+    if (!file) return;
+
+    if (file.size > 200 * 1024) {
+      this.logoError = 'Logo image must be 200 KB or smaller.';
+      return;
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type.toLowerCase())) {
+      this.logoError = 'Choose a JPG, PNG, or WebP image.';
+      return;
+    }
+
+    try {
+      const bitmap = await createImageBitmap(file);
+      let compressed: Blob | null = null;
+      let smallestUnderLimit: Blob | null = null;
+      let compressedWidth = 0;
+      let compressedHeight = 0;
+      let outputWidth = 0;
+      let outputHeight = 0;
+      for (const dimension of [300, 260, 220, 180, 160]) {
+        const scale = Math.min(1, dimension / bitmap.width, dimension / bitmap.height);
+        outputWidth = Math.max(1, Math.round(bitmap.width * scale));
+        outputHeight = Math.max(1, Math.round(bitmap.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = outputWidth;
+        canvas.height = outputHeight;
+        const context = canvas.getContext('2d', { alpha: true });
+        if (!context) {
+          bitmap.close();
+          throw new Error('Unable to prepare a logo preview.');
+        }
+        context.drawImage(bitmap, 0, 0, outputWidth, outputHeight);
+        for (const quality of [0.85, 0.78, 0.7, 0.62, 0.55]) {
+          compressed = await new Promise<Blob | null>(resolve =>
+            canvas.toBlob(resolve, 'image/webp', quality)
+          );
+          if (!compressed || compressed.type !== 'image/webp') {
+            bitmap.close();
+            throw new Error('This browser cannot prepare WebP logo images.');
+          }
+          if (compressed.size <= 100 * 1024 && (
+            !smallestUnderLimit || compressed.size < smallestUnderLimit.size
+          )) {
+            smallestUnderLimit = compressed;
+            compressedWidth = outputWidth;
+            compressedHeight = outputHeight;
+          }
+          if (compressed.size <= 80 * 1024) break;
+        }
+        if (compressed && compressed.size <= 80 * 1024) break;
+      }
+      bitmap.close();
+
+      if (!compressed || compressed.size > 80 * 1024) {
+        compressed = smallestUnderLimit;
+      }
+      if (!compressed || compressed.size > 100 * 1024) {
+        this.logoError = 'This image cannot be compressed below 100 KB. Choose a simpler or smaller logo.';
+        return;
+      }
+
+      this.selectedLogoFile = file;
+      this.logoOriginalBytes = file.size;
+      this.logoCompressedBytes = compressed.size;
+      this.logoPreviewUrl = URL.createObjectURL(compressed);
+      this.logoMessage = `Preview ready at ${compressedWidth} × ${compressedHeight}px. Upload to save the compressed logo.`;
+    } catch (error) {
+      console.error('Business logo image preparation error:', error);
+      this.logoError = error instanceof Error
+        ? error.message
+        : 'Unable to read or compress this image.';
+    }
+  }
+
+  uploadLogo(): void {
+    if (!this.selectedLogoFile || this.logoUploading) return;
+    this.logoUploading = true;
+    this.logoError = '';
+    this.logoMessage = '';
+    this.management.uploadBusinessLogo(this.selectedLogoFile)
+      .pipe(finalize(() => {
+        this.logoUploading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          const business = response.business;
+          this.form.logoUrl = business.logoUrl || '';
+          this.logoStorage = business.logoStorage || null;
+          this.businessLogoUpdated.emit(this.form.logoUrl);
+          this.selectedLogoFile = null;
+          this.clearLogoPreview();
+          this.logoOriginalBytes = response.compression?.originalBytes || 0;
+          this.logoCompressedBytes = response.compression?.compressedBytes || this.logoStorage?.bytes || 0;
+          localStorage.setItem('business', JSON.stringify(business));
+          const targetResult = response.compression?.targetRangeMet
+            ? 'The 30–80 KB recommended target was met.'
+            : 'The 30–80 KB recommended target was not met; the 100 KB maximum was respected.';
+          this.logoMessage = `Logo saved. Original ${this.kilobytes(this.logoOriginalBytes)} KB · compressed ${this.kilobytes(this.logoCompressedBytes)} KB. ${targetResult}`;
+          if (response.previousAssetCleanupPending) {
+            this.logoMessage += ' Previous image cleanup is pending.';
+          }
+        },
+        error: error => {
+          console.error('Business logo upload error:', error);
+          this.logoError = error.error?.message || 'Unable to upload the business logo.';
+        }
+      });
+  }
+
+  removeLogo(): void {
+    if (this.logoRemoving) return;
+    this.logoRemoving = true;
+    this.logoError = '';
+    this.logoMessage = '';
+    this.management.removeBusinessLogo()
+      .pipe(finalize(() => {
+        this.logoRemoving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          const business = response.business;
+          this.form.logoUrl = business.logoUrl || '';
+          this.logoStorage = business.logoStorage || null;
+          this.businessLogoUpdated.emit(this.form.logoUrl);
+          this.selectedLogoFile = null;
+          this.clearLogoPreview();
+          this.logoOriginalBytes = 0;
+          this.logoCompressedBytes = 0;
+          localStorage.setItem('business', JSON.stringify(business));
+          this.logoMessage = response.cleanupPending
+            ? 'Logo removed from the business profile. Storage cleanup is pending.'
+            : 'Business logo removed.';
+        },
+        error: error => {
+          console.error('Business logo removal error:', error);
+          this.logoError = error.error?.message || 'Unable to remove the business logo.';
+        }
+      });
+  }
+
+  kilobytes(bytes: number): string {
+    return (bytes / 1024).toFixed(1);
+  }
+
+  private clearLogoPreview(): void {
+    if (this.logoPreviewUrl) URL.revokeObjectURL(this.logoPreviewUrl);
+    this.logoPreviewUrl = '';
+  }
+
   load(): void {
     this.loading = true;
     this.errorMessage = '';
@@ -264,6 +449,7 @@ export class BusinessSettings implements OnInit {
             gstPercentage: Number(business.gstPercentage || 0),
             taxInclusive: business.taxInclusive !== false
           };
+          this.logoStorage = business.logoStorage || null;
         },
         error: error => {
           console.error('Business settings loading error:', error);
@@ -302,6 +488,7 @@ export class BusinessSettings implements OnInit {
             gstPercentage: Number(business.gstPercentage || 0),
             taxInclusive: business.taxInclusive !== false
           };
+          this.logoStorage = business.logoStorage || null;
           localStorage.setItem('business', JSON.stringify(business));
           this.businessUpdated.emit(business.businessName);
           this.successMessage = 'Business settings saved.';

@@ -36,8 +36,13 @@
       <strong>{{ money(summary.pendingExpenses) }}</strong>
       <small>Outstanding amount</small>
     </article>
+    <article class="summary-card pending">
+      <span>Outstanding Amount</span>
+      <strong>{{ money(summary.outstandingAmount ?? summary.pendingExpenses) }}</strong>
+      <small>Unpaid balance across expenses</small>
+    </article>
     <article class="summary-card">
-      <span>This Month</span>
+      <span>This Month Expenses</span>
       <strong>{{ money(summary.thisMonthExpenses) }}</strong>
       <small>Current business calendar month</small>
     </article>
@@ -121,7 +126,7 @@
         <option value="">All statuses</option>
         <option value="PAID">Paid</option>
         <option value="PENDING">Pending</option>
-        <option value="PARTIALLY_PAID">Partially Paid</option>
+        <option value="PARTIAL">Partial</option>
       </select>
     </label>
     <label>Sort
@@ -206,12 +211,15 @@
             <td>{{ money(expense.amount) }}</td>
             <td>{{ money(expense.paidAmount) }}</td>
             <td>{{ money(expense.outstandingAmount) }}</td>
-            <td><span class="status-badge" [ngClass]="expense.status.toLowerCase()">{{ expense.status.replace('_', ' ') }}</span></td>
+            <td><span class="status-badge" [ngClass]="expense.status.toLowerCase()">
+              {{ expense.status === 'PARTIALLY_PAID' ? 'PARTIAL' : expense.status.replace('_', ' ') }}
+            </span></td>
             <td>{{ expense.paymentMethod || '—' }}</td>
             <td class="row-actions">
               <button type="button" (click)="openDetails(expense)">View</button>
               <ng-container *ngIf="archiveFilter === 'active'; else restoreAction">
                 <button type="button" (click)="openEditForm(expense)">Edit</button>
+                <button type="button" *ngIf="expense.outstandingAmount > 0" (click)="openPaymentForm(expense)">Mark as Paid</button>
                 <button type="button" class="delete-action" (click)="removeExpense(expense)"
                   [disabled]="deletingId === expense._id">
                   {{ deletingId === expense._id ? 'Archiving…' : 'Archive' }}
@@ -309,17 +317,6 @@
         <label>Due date
           <input name="dueDate" type="date" [(ngModel)]="form.dueDate">
         </label>
-        <label *ngIf="editingExpense">Record additional payment (INR)
-          <input name="paymentAmount" type="number" min="0" [max]="editingExpense.outstandingAmount" step="0.01" [(ngModel)]="form.paymentAmount">
-        </label>
-        <label *ngIf="editingExpense && hasPaymentAmount()">Payment date *
-          <input name="paymentDate" type="date" [(ngModel)]="form.paymentDate" required>
-        </label>
-        <label *ngIf="editingExpense && hasPaymentAmount()">Payment method *
-          <select name="paymentMethod" [(ngModel)]="form.paymentMethod" required>
-            <option *ngFor="let method of paymentMethods" [value]="method">{{ method }}</option>
-          </select>
-        </label>
         <label>Vendor / Payee
           <input name="vendor" [(ngModel)]="form.vendor" maxlength="120">
         </label>
@@ -328,9 +325,6 @@
         </label>
         <label>Transaction reference
           <input name="transactionReference" [(ngModel)]="form.transactionReference" maxlength="120">
-        </label>
-        <label *ngIf="editingExpense && hasPaymentAmount()">Payment reference
-          <input name="paymentReference" [(ngModel)]="form.paymentReference" maxlength="120">
         </label>
         <label class="wide-field">Description
           <textarea name="description" rows="3" [(ngModel)]="form.description" maxlength="2000"></textarea>
@@ -343,12 +337,9 @@
             (change)="onReceiptSelected($event)" [disabled]="saving">
           <small *ngIf="receiptFile">{{ receiptFile.name }}</small>
         </label>
-        <label class="wide-field" *ngIf="editingExpense && hasPaymentAmount()">Payment notes
-          <textarea name="paymentNotes" rows="2" [(ngModel)]="form.paymentNotes" maxlength="500"></textarea>
-        </label>
       </div>
       <p class="form-note" *ngIf="!editingExpense">New expenses are saved as pending. Record an actual payment after saving; membership payments are not affected.</p>
-      <p class="form-note" *ngIf="editingExpense">Payment entries are append-only for auditability. The payment status is calculated from recorded payments.</p>
+      <p class="form-note" *ngIf="editingExpense">Record payments separately using the Mark as Paid action. Payment history is append-only for auditability.</p>
       <footer class="modal-actions">
         <button type="button" class="secondary-btn" (click)="closeForm()" [disabled]="saving">Cancel</button>
         <button type="submit" class="primary-btn" [disabled]="saving || categoriesLoading">
@@ -376,6 +367,7 @@
       <div><dt>Vendor</dt><dd>{{ selectedExpense.vendor || '—' }}</dd></div>
       <div><dt>Invoice</dt><dd>{{ selectedExpense.invoiceNumber || '—' }}</dd></div>
       <div><dt>Due date</dt><dd>{{ selectedExpense.dueDate ? formatDate(selectedExpense.dueDate) : '—' }}</dd></div>
+      <div><dt>Payment status</dt><dd>{{ selectedExpense.status === 'PARTIALLY_PAID' ? 'PARTIAL' : selectedExpense.status }}</dd></div>
       <div><dt>Receipt</dt><dd>
         <button type="button" class="receipt-link" *ngIf="selectedExpense.receipt" (click)="openReceipt(selectedExpense)">
           {{ selectedExpense.receipt.originalName || 'Open receipt' }}
@@ -386,14 +378,64 @@
       <div class="wide-field"><dt>Internal notes</dt><dd>{{ selectedExpense.notes || '—' }}</dd></div>
     </dl>
     <h3>Payment history</h3>
+    <button type="button" class="primary-btn" *ngIf="selectedExpense.outstandingAmount > 0"
+      (click)="openPaymentForm(selectedExpense)">Mark as Paid</button>
     <div class="payment-history" *ngIf="selectedExpense.payments.length; else noPayments">
       <div *ngFor="let payment of selectedExpense.payments">
-        <span>{{ formatDate(payment.paidAt) }} · {{ payment.paymentMethod }}</span>
-        <strong>{{ money(payment.amount) }}</strong>
-        <small *ngIf="payment.reference">{{ payment.reference }}</small>
+        <span><strong>Payment Date</strong> {{ formatDate(payment.paidAt) }}</span>
+        <span><strong>Amount</strong> {{ money(payment.amount) }}</span>
+        <span><strong>Method</strong> {{ payment.paymentMethod }}</span>
+        <span><strong>Reference</strong> {{ payment.reference || '—' }}</span>
+        <span><strong>Recorded By</strong> {{ recordedByName(payment) }}</span>
+        <small><strong>Notes</strong> {{ payment.notes || '—' }}</small>
       </div>
     </div>
     <ng-template #noPayments><p class="empty-state">No payments have been recorded.</p></ng-template>
+  </section>
+</div>
+
+<div class="modal-backdrop" *ngIf="showPaymentForm && paymentExpense" (click)="closePaymentForm()">
+  <section class="expense-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="expense-payment-title"
+    (click)="$event.stopPropagation()">
+    <header class="modal-heading">
+      <div><span class="eyebrow">EXPENSE PAYMENT</span><h2 id="expense-payment-title">Mark as Paid</h2></div>
+      <button type="button" class="close-btn" (click)="closePaymentForm()" [disabled]="paymentSaving">×</button>
+    </header>
+    <p class="feedback error" *ngIf="paymentError" role="alert">{{ paymentError }}</p>
+    <dl class="payment-confirmation">
+      <div><dt>Expense</dt><dd>{{ paymentExpense.title }}</dd></div>
+      <div><dt>Total amount</dt><dd>{{ money(paymentExpense.amount) }}</dd></div>
+      <div><dt>Already paid</dt><dd>{{ money(paymentExpense.paidAmount) }}</dd></div>
+      <div><dt>Remaining balance</dt><dd>{{ money(paymentExpense.outstandingAmount) }}</dd></div>
+    </dl>
+    <form (ngSubmit)="recordPayment()">
+      <div class="form-grid">
+        <label>Payment amount *
+          <input name="expensePaymentAmount" type="number" min="0.01" step="0.01"
+            [max]="paymentExpense.outstandingAmount" [(ngModel)]="paymentForm.amount" required>
+        </label>
+        <label>Payment method *
+          <select name="expensePaymentMethod" [(ngModel)]="paymentForm.paymentMethod" required>
+            <option *ngFor="let method of paymentMethods" [value]="method">{{ method }}</option>
+          </select>
+        </label>
+        <label>Payment date *
+          <input name="expensePaymentDate" type="date" [(ngModel)]="paymentForm.paymentDate" required>
+        </label>
+        <label>Transaction reference
+          <input name="expensePaymentReference" [(ngModel)]="paymentForm.reference" maxlength="120">
+        </label>
+        <label class="wide-field">Notes
+          <textarea name="expensePaymentNotes" rows="2" [(ngModel)]="paymentForm.notes" maxlength="500"></textarea>
+        </label>
+      </div>
+      <footer class="modal-actions">
+        <button type="button" class="secondary-btn" (click)="closePaymentForm()" [disabled]="paymentSaving">Cancel</button>
+        <button type="submit" class="primary-btn" [disabled]="paymentSaving">
+          {{ paymentSaving ? 'Recording…' : 'Confirm Payment' }}
+        </button>
+      </footer>
+    </form>
   </section>
 </div>
 

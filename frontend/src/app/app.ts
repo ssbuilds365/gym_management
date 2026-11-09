@@ -56,10 +56,16 @@ export class App implements OnInit, OnDestroy {
   sessionRemainingMs = 30 * 60 * 1000;
 
   businessName = environment.appName;
+  businessLogoUrl = '';
   ownerName = 'Admin';
 
   stats: any[] = [];
   recentMembers: any[] = [];
+  birthdayMembers: Array<{ _id: string; fullName: string; phone: string; age: number | null }> = [];
+  birthdayCount = 0;
+  birthdaysLoading = false;
+  birthdaysError = '';
+  birthdayActionError = '';
   memberToFocus: ExpiringMember | null = null;
   readonly dashboardStatPlaceholders = [0, 1, 2, 3];
 
@@ -80,6 +86,7 @@ export class App implements OnInit, OnDestroy {
   private sessionVerificationStarted = false;
   private routerSubscription?: Subscription;
   private dashboardRefreshSubscription?: Subscription;
+  private birthdaysRequest?: Subscription;
   private sessionWarningSubscription?: Subscription;
   private sessionRemainingSubscription?: Subscription;
   private sessionExpiredSubscription?: Subscription;
@@ -172,6 +179,7 @@ export class App implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.routerSubscription?.unsubscribe();
     this.dashboardRefreshSubscription?.unsubscribe();
+    this.birthdaysRequest?.unsubscribe();
     this.sessionWarningSubscription?.unsubscribe();
     this.sessionRemainingSubscription?.unsubscribe();
     this.sessionExpiredSubscription?.unsubscribe();
@@ -230,11 +238,15 @@ export class App implements OnInit, OnDestroy {
               this.stats = [];
               this.recentMembers = [];
               this.collections = null;
+              this.birthdayMembers = [];
+              this.birthdayCount = 0;
+              this.birthdaysError = '';
               this.dashboardLoadedAt = 0;
             }
 
             this.ownerName = response.owner.name || 'Owner';
             this.businessName = response.business.businessName || this.appName;
+            this.businessLogoUrl = response.business.logoUrl || '';
             this.selectedMenu = currentUrl.startsWith('/members') ? 'Members' : 'Dashboard';
             this.loadDashboardData();
           } else {
@@ -308,6 +320,9 @@ export class App implements OnInit, OnDestroy {
     this.dashboardLoadedAt = 0;
     this.stats = [];
     this.recentMembers = [];
+    this.birthdayMembers = [];
+    this.birthdayCount = 0;
+    this.birthdaysError = '';
     this.dashboardError = '';
     this.todayAttendance = 0;
     this.dashboardTimeZone = 'Asia/Kolkata';
@@ -315,6 +330,7 @@ export class App implements OnInit, OnDestroy {
 
     this.ownerName = 'Admin';
     this.businessName = this.appName;
+    this.businessLogoUrl = '';
     this.selectedMenu = 'Dashboard';
 
     this.mobileMenuOpen = false;
@@ -388,6 +404,7 @@ export class App implements OnInit, OnDestroy {
 
     this.dashboardLoading = true;
     this.dashboardError = '';
+    this.loadTodaysBirthdays();
 
     this.dashboardService.getDashboardStats()
       .pipe(
@@ -488,6 +505,70 @@ export class App implements OnInit, OnDestroy {
             'Unable to load dashboard data. Please try again.';
         }
       });
+  }
+
+  private loadTodaysBirthdays(): void {
+    this.birthdaysRequest?.unsubscribe();
+    this.birthdaysLoading = true;
+    this.birthdaysError = '';
+    this.birthdaysRequest = this.dashboardService.getTodaysBirthdays()
+      .pipe(finalize(() => {
+        this.birthdaysLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          if (!response?.success || !Array.isArray(response.members)) {
+            this.birthdaysError = 'Unable to load today’s birthdays.';
+            this.birthdayMembers = [];
+            this.birthdayCount = 0;
+            return;
+          }
+          this.birthdayMembers = response.members.map((member: any) => ({
+            _id: String(member._id),
+            fullName: String(member.fullName || 'Member'),
+            phone: String(member.phone || '—'),
+            age: Number.isInteger(member.age) && member.age >= 0 ? member.age : null
+          }));
+          this.birthdayCount = Number(response.count) || this.birthdayMembers.length;
+        },
+        error: error => {
+          console.error('Dashboard birthdays loading error:', error);
+          this.birthdaysError = error.error?.message || 'Unable to load today’s birthdays.';
+          this.birthdayMembers = [];
+          this.birthdayCount = 0;
+        }
+      });
+  }
+
+  sendBirthdayWhatsApp(member: { fullName: string; phone: string }): void {
+    this.birthdayActionError = '';
+    const digits = String(member.phone || '').replace(/\D/g, '');
+    let internationalNumber = '';
+    if (/^[6-9]\d{9}$/.test(digits)) {
+      internationalNumber = `91${digits}`;
+    } else if (/^91[6-9]\d{9}$/.test(digits)) {
+      internationalNumber = digits;
+    }
+
+    if (!internationalNumber) {
+      this.birthdayActionError = 'This member does not have a valid WhatsApp mobile number.';
+      return;
+    }
+
+    const message = `🎉 Happy Birthday, ${member.fullName}! 🎂
+
+Wishing you a fantastic birthday filled with happiness, good health, and success!
+
+Keep staying active, keep working towards your fitness goals, and keep getting stronger every day. 💪🔥
+
+Your SS Fitness Manager family wishes you an amazing year ahead!
+
+Stay Fit. Stay Strong. ❤️
+
+– Team SS Builds`;
+    const url = `https://wa.me/${internationalNumber}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   get maxMonthlyRevenue(): number {

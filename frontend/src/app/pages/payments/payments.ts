@@ -13,12 +13,23 @@ import { FormsModule } from '@angular/forms';
 import { finalize, Subscription } from 'rxjs';
 
 import { PaymentService } from '../../services/payment';
-import { MemberService } from '../../services/member';
-import { MembershipPlanService } from '../../services/membership-plan';
 import { DashboardService } from '../../services/dashboard';
 import { environment } from '../../../environments/environment';
 import { jsPDF } from 'jspdf';
 import { GST_STATES } from '../../utils/gst-states';
+
+type PaymentCategory = 'gym-membership' | 'personal-training';
+
+interface EligibleMember {
+  _id: string;
+  fullName: string;
+  phone: string;
+  totalFee: number;
+  alreadyPaid: number;
+  pendingAmount: number;
+  memberships?: any[];
+  ptPackages?: any[];
+}
 
 @Component({
   selector: 'app-payments',
@@ -32,8 +43,11 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
   @Input() active = false;
 
   payments: any[] = [];
-  members: any[] = [];
+  members: EligibleMember[] = [];
+  memberSearch = '';
   memberships: any[] = [];
+  ptPackages: any[] = [];
+  paymentCategory: PaymentCategory = 'gym-membership';
   currentPage = 1;
   readonly pageLimit = 25;
   totalPayments = 0;
@@ -47,7 +61,9 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
   paymentSummaryLoaded = false;
   private queuedPaymentPage?: number;
   private lastLoadedAt = 0;
-  private membershipRequest?: Subscription;
+  private eligibleMembersRequest?: Subscription;
+  private ptPaymentRequestId = '';
+  private ptPaymentRequestFingerprint = '';
 
   loading = false;
   membersLoading = false;
@@ -64,6 +80,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
 
   selectedMemberId = '';
   selectedMembershipId = '';
+  selectedPTPackageId = '';
 
   paymentForm: any = {
     amount: null,
@@ -77,19 +94,16 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
 
   constructor(
     private paymentService: PaymentService,
-    private memberService: MemberService,
-    private membershipPlanService: MembershipPlanService,
     private dashboardService: DashboardService,
     private changeDetector: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
     this.loadPayments();
-    this.loadMembers();
   }
 
   ngOnDestroy(): void {
-    this.membershipRequest?.unsubscribe();
+    this.eligibleMembersRequest?.unsubscribe();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -100,9 +114,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
       (!this.lastLoadedAt || Date.now() - this.lastLoadedAt >= 60_000)
     ) {
       this.loadPayments();
-      if (!this.membersLoading) {
-        this.loadMembers();
-      }
+      if (this.showPaymentForm) this.loadEligibleMembers();
     }
   }
 
@@ -154,28 +166,47 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     });
   }
 
-  // Load active members
-  loadMembers(): void {
-    if (this.membersLoading) {
-      return;
-    }
-
+  loadEligibleMembers(): void {
+    this.eligibleMembersRequest?.unsubscribe();
+    const category = this.paymentCategory;
     this.membersLoading = true;
-
-    this.memberService.getAllMatchingMembers('', 'Active')
+    this.eligibleMembersRequest = this.paymentService.getEligibleMembers(category)
       .pipe(finalize(() => {
         this.membersLoading = false;
         this.changeDetector.markForCheck();
       }))
       .subscribe({
-      next: (members) => {
-        this.members = members;
+      next: response => {
+        if (this.paymentCategory !== category) return;
+        if (!response?.success || !Array.isArray(response.members)) {
+          this.errorMessage = 'Unable to load members with outstanding fees.';
+          this.members = [];
+          return;
+        }
+        this.members = response.members;
       },
       error: (error) => {
-        console.error('Members loading error:', error);
-        this.errorMessage = 'Unable to load members.';
+        console.error('Eligible payment members loading error:', error);
+        this.errorMessage = error.error?.message || 'Unable to load members with outstanding fees.';
+        this.members = [];
       }
     });
+  }
+
+  onPaymentCategoryChange(): void {
+    this.selectedMemberId = '';
+    this.selectedMembershipId = '';
+    this.selectedPTPackageId = '';
+    this.memberships = [];
+    this.ptPackages = [];
+    this.paymentForm.amount = null;
+    this.resetPTPaymentRequest();
+    this.memberSearch = '';
+    this.errorMessage = '';
+    if (this.paymentCategory === 'personal-training' && this.paymentForm.paymentMethod === 'Razorpay') {
+      this.paymentForm.paymentMethod = 'Cash';
+    }
+    if (this.showPaymentForm) this.loadEligibleMembers();
   }
 
   // Open payment form
@@ -183,65 +214,47 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     this.showPaymentForm = true;
     this.successMessage = '';
     this.errorMessage = '';
+    this.loadEligibleMembers();
   }
 
   // Close payment form
   closePaymentForm(): void {
-    this.membershipRequest?.unsubscribe();
-    this.membershipsLoading = false;
+    this.eligibleMembersRequest?.unsubscribe();
+    this.membersLoading = false;
     this.showPaymentForm = false;
     this.selectedMemberId = '';
     this.selectedMembershipId = '';
+    this.selectedPTPackageId = '';
     this.memberships = [];
+    this.ptPackages = [];
     this.resetPaymentForm();
   }
 
   // When member changes
   onMemberChange(): void {
-    this.membershipRequest?.unsubscribe();
-    this.membershipRequest = undefined;
     this.selectedMembershipId = '';
+    this.selectedPTPackageId = '';
     this.memberships = [];
-    this.membershipsLoading = false;
+    this.ptPackages = [];
+    this.resetPTPaymentRequest();
     this.successMessage = '';
     this.errorMessage = '';
+    const member = this.selectedMember;
+    this.memberships = member?.memberships || [];
+    this.ptPackages = member?.ptPackages || [];
+  }
 
-    if (!this.selectedMemberId) {
-      return;
-    }
+  get filteredMembers(): EligibleMember[] {
+    const query = this.memberSearch.trim().toLocaleLowerCase();
+    if (!query) return this.members;
+    return this.members.filter(member =>
+      [member.fullName, member._id, member.phone]
+        .some(value => String(value || '').toLocaleLowerCase().includes(query))
+    );
+  }
 
-    const memberId = this.selectedMemberId;
-    this.membershipsLoading = true;
-
-    this.membershipRequest = this.membershipPlanService
-      .getMemberMemberships(memberId)
-      .pipe(finalize(() => {
-        if (this.selectedMemberId === memberId) {
-          this.membershipsLoading = false;
-        }
-        this.changeDetector.markForCheck();
-      }))
-      .subscribe({
-        next: (response) => {
-          if (this.selectedMemberId !== memberId) return;
-          const allMemberships = response.memberships || [];
-
-          this.memberships = allMemberships.filter((membership: any) => {
-            const pendingCents =
-              Math.round(Number(membership.planPrice) * 100) -
-              Math.round(Number(membership.paidAmount || 0) * 100);
-
-            return membership.status !== 'Cancelled' && pendingCents > 0;
-          });
-
-        },
-        error: (error) => {
-          if (this.selectedMemberId !== memberId) return;
-          console.error('Membership loading error:', error);
-          this.errorMessage =
-            error.error?.message || 'Unable to load memberships.';
-        }
-      });
+  get selectedMember(): EligibleMember | null {
+    return this.members.find(member => member._id === this.selectedMemberId) || null;
   }
 
   // Selected membership
@@ -253,14 +266,9 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
 
   // Remaining membership fees
   get pendingAmount(): number {
-    if (!this.selectedMembership) {
-      return 0;
-    }
-
-    const pendingCents =
-      Math.round(Number(this.selectedMembership.planPrice) * 100) -
-      Math.round(Number(this.selectedMembership.paidAmount || 0) * 100);
-    return Math.max(0, pendingCents) / 100;
+    return this.paymentCategory === 'gym-membership'
+      ? Number(this.selectedMembership?.pendingAmount || 0)
+      : Number(this.selectedPTPackage?.pendingAmount || 0);
   }
 
   // Select membership
@@ -268,6 +276,41 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     this.paymentForm.amount = this.pendingAmount || null;
     this.paymentForm.placeOfSupplyStateCode =
       this.selectedMembership?.placeOfSupplyStateCode || '';
+  }
+
+  get selectedPTPackage(): any {
+    return this.ptPackages.find(ptPackage => ptPackage._id === this.selectedPTPackageId) || null;
+  }
+
+  onPTPackageChange(): void {
+    this.paymentForm.amount = this.pendingAmount || null;
+    this.resetPTPaymentRequest();
+  }
+
+  get canSubmitPayment(): boolean {
+    const amount = Number(this.paymentForm.amount);
+    const hasSelectedLedger = this.paymentCategory === 'gym-membership'
+      ? !!this.selectedMembership
+      : !!this.selectedPTPackage;
+    return hasSelectedLedger
+      && this.pendingAmount > 0
+      && Number.isFinite(amount)
+      && amount > 0
+      && amount <= this.pendingAmount;
+  }
+
+  private resetPTPaymentRequest(): void {
+    this.ptPaymentRequestId = '';
+    this.ptPaymentRequestFingerprint = '';
+  }
+
+  private getPTPaymentRequestId(payload: Record<string, unknown>): string {
+    const fingerprint = JSON.stringify(payload);
+    if (!this.ptPaymentRequestId || this.ptPaymentRequestFingerprint !== fingerprint) {
+      this.ptPaymentRequestId = crypto.randomUUID();
+      this.ptPaymentRequestFingerprint = fingerprint;
+    }
+    return this.ptPaymentRequestId;
   }
 
   // Save payment
@@ -279,8 +322,16 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     this.errorMessage = '';
     this.successMessage = '';
 
-    if (!this.selectedMemberId || !this.selectedMembershipId) {
-      this.errorMessage = 'Please select a member and membership.';
+    if (!this.selectedMemberId) {
+      this.errorMessage = 'Please select a member with an outstanding balance.';
+      return;
+    }
+    if (this.paymentCategory === 'gym-membership' && !this.selectedMembershipId) {
+      this.errorMessage = 'Please select a membership.';
+      return;
+    }
+    if (this.paymentCategory === 'personal-training' && !this.selectedPTPackageId) {
+      this.errorMessage = 'Please select a PT package.';
       return;
     }
 
@@ -301,6 +352,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
       return;
     }
     if (
+      this.paymentCategory === 'gym-membership' &&
       this.selectedMembership?.gstSnapshot?.enabled &&
       !this.selectedMembership.placeOfSupplyStateCode &&
       !this.paymentForm.placeOfSupplyStateCode
@@ -309,21 +361,36 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
       return;
     }
 
-    const paymentData = {
-      memberId: this.selectedMemberId,
-      membershipId: this.selectedMembershipId,
-      amount,
-      paymentMethod: this.paymentForm.paymentMethod,
-      paymentType: this.paymentForm.paymentType,
-      transactionId: this.paymentForm.transactionId,
-      paymentDate: this.paymentForm.paymentDate,
-      notes: this.paymentForm.notes,
-      placeOfSupplyStateCode: this.paymentForm.placeOfSupplyStateCode
-    };
+    let request;
+    if (this.paymentCategory === 'gym-membership') {
+      request = this.paymentService.createPayment({
+          memberId: this.selectedMemberId,
+          membershipId: this.selectedMembershipId,
+          amount,
+          paymentMethod: this.paymentForm.paymentMethod,
+          paymentType: this.paymentForm.paymentType,
+          transactionId: this.paymentForm.transactionId,
+          paymentDate: this.paymentForm.paymentDate,
+          notes: this.paymentForm.notes,
+          placeOfSupplyStateCode: this.paymentForm.placeOfSupplyStateCode
+        });
+    } else {
+      const payload = {
+        amount,
+        paymentMethod: this.paymentForm.paymentMethod,
+        transactionReference: this.paymentForm.transactionId,
+        paymentDate: this.paymentForm.paymentDate,
+        notes: this.paymentForm.notes
+      };
+      request = this.paymentService.recordPersonalTrainingPayment(this.selectedPTPackageId, {
+        ...payload,
+        requestId: this.getPTPaymentRequestId(payload)
+      });
+    }
 
     this.savingPayment = true;
 
-    this.paymentService.createPayment(paymentData)
+    request
       .pipe(finalize(() => {
         this.savingPayment = false;
         this.changeDetector.markForCheck();
@@ -348,6 +415,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
 
   // Reset form fields
   resetPaymentForm(): void {
+    this.resetPTPaymentRequest();
     this.paymentForm = {
       amount: null,
       paymentMethod: 'Cash',

@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 const TrainerStaff = require('../models/TrainerStaff');
 const Member = require('../models/Member');
+const TrainerAssignment = require('../models/TrainerAssignment');
+const TrainerPTPackage = require('../models/TrainerPTPackage');
+const MemberMembership = require('../models/MemberMembership');
+const Payment = require('../models/Payment');
 
 const fields = [
   'name',
@@ -8,6 +12,7 @@ const fields = [
   'email',
   'role',
   'specialization',
+  'maxClientCapacity',
   'designation',
   'department',
   'joiningDate',
@@ -56,6 +61,14 @@ const buildRecord = (body, isCreate) => {
   else if (data.salaryAmount !== undefined && data.salaryAmount !== null) {
     data.salaryAmount = Number(data.salaryAmount);
   }
+  if (data.maxClientCapacity === '') data.maxClientCapacity = null;
+  else if (data.maxClientCapacity !== undefined && data.maxClientCapacity !== null) {
+    const capacity = Number(data.maxClientCapacity);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) {
+      return { error: 'Maximum client capacity must be a positive whole number' };
+    }
+    data.maxClientCapacity = capacity;
+  }
   if (data.joiningDate !== undefined) {
     const date = new Date(data.joiningDate);
     if (Number.isNaN(date.getTime())) return { error: 'Enter a valid joining date' };
@@ -71,17 +84,33 @@ const buildRecord = (body, isCreate) => {
 const validId = id => mongoose.Types.ObjectId.isValid(id);
 exports.validateTrainerStaffRecord = buildRecord;
 
-const assignedCounts = async (tenantId, trainerIds) => {
+const assignedCounts = async (tenantId, businessId, trainerIds) => {
   if (!trainerIds.length) return new Map();
   const groups = await Member.aggregate([
     {
       $match: {
         tenantId,
+        businessId,
         deletedAt: null,
-        assignedTrainerId: { $in: trainerIds }
+        $or: [
+          { assignedTrainerId: { $in: trainerIds } },
+          { additionalTrainerIds: { $in: trainerIds } }
+        ]
       }
     },
-    { $group: { _id: '$assignedTrainerId', count: { $sum: 1 } } }
+    {
+      $project: {
+        trainerIds: {
+          $setUnion: [
+            { $ifNull: ['$additionalTrainerIds', []] },
+            { $cond: [{ $ifNull: ['$assignedTrainerId', false] }, ['$assignedTrainerId'], []] }
+          ]
+        }
+      }
+    },
+    { $unwind: '$trainerIds' },
+    { $match: { trainerIds: { $in: trainerIds } } },
+    { $group: { _id: '$trainerIds', count: { $sum: 1 } } }
   ]);
   return new Map(groups.map(row => [String(row._id), row.count]));
 };
@@ -123,6 +152,7 @@ exports.listTrainerStaff = async (req, res) => {
     ]);
     const counts = await assignedCounts(
       tenantId,
+      req.owner.businessId,
       staff.filter(row => row.role === 'Trainer').map(row => row._id)
     );
     const summaryByRole = Object.fromEntries(summary.map(row => [row._id, {
@@ -200,8 +230,12 @@ exports.updateTrainerStaff = async (req, res) => {
       const assignedCount = existing.role === 'Trainer'
         ? await Member.countDocuments({
           tenantId: req.tenantId,
+          businessId: req.owner.businessId,
           deletedAt: null,
-          assignedTrainerId: existing._id
+          $or: [
+            { assignedTrainerId: existing._id },
+            { additionalTrainerIds: existing._id }
+          ]
         })
         : 0;
       if (assignedCount) {
@@ -214,8 +248,12 @@ exports.updateTrainerStaff = async (req, res) => {
     if (data.status === 'Inactive' && existing.role === 'Trainer') {
       const assignedCount = await Member.countDocuments({
         tenantId: req.tenantId,
+        businessId: req.owner.businessId,
         deletedAt: null,
-        assignedTrainerId: existing._id
+        $or: [
+          { assignedTrainerId: existing._id },
+          { additionalTrainerIds: existing._id }
+        ]
       });
       if (assignedCount) {
         return res.status(409).json({
@@ -256,14 +294,32 @@ exports.deleteTrainerStaff = async (req, res) => {
     }
     const assigned = await Member.exists({
       tenantId: req.tenantId,
+      businessId: req.owner.businessId,
       deletedAt: null,
-      assignedTrainerId: req.params.id
+      $or: [
+        { assignedTrainerId: req.params.id },
+        { additionalTrainerIds: req.params.id }
+      ]
     });
     if (assigned) {
       return res.status(409).json({
         success: false,
         message: 'Reassign or remove this trainer’s members before removing the record'
       });
+    }
+    if (await TrainerStaff.exists({ _id: req.params.id, tenantId: req.tenantId, role: 'Trainer' })) {
+      const historicalReferences = await Promise.all([
+        TrainerAssignment.exists({ tenantId: req.tenantId, businessId: req.owner.businessId, trainerId: req.params.id }),
+        TrainerPTPackage.exists({ tenantId: req.tenantId, businessId: req.owner.businessId, trainerId: req.params.id }),
+        MemberMembership.exists({ tenantId: req.tenantId, businessId: req.owner.businessId, attributedTrainerId: req.params.id }),
+        Payment.exists({ tenantId: req.tenantId, businessId: req.owner.businessId, attributedTrainerId: req.params.id })
+      ]);
+      if (historicalReferences.some(Boolean)) {
+        return res.status(409).json({
+          success: false,
+          message: 'This trainer has assignment or financial history and cannot be deleted. Deactivate the trainer instead.'
+        });
+      }
     }
     const staff = await TrainerStaff.findOneAndDelete({
       _id: req.params.id,
@@ -396,23 +452,37 @@ exports.getTrainerStaffReport = async (req, res) => {
 
     const rows = await TrainerStaff.find(filter).sort({ role: 1, name: 1 }).lean();
     const trainers = rows.filter(row => row.role === 'Trainer');
-    const counts = await assignedCounts(req.tenantId, trainers.map(row => row._id));
+    const counts = await assignedCounts(
+      req.tenantId,
+      req.owner.businessId,
+      trainers.map(row => row._id)
+    );
     const assignedMembers = trainers.length
       ? await Member.find({
         tenantId: req.tenantId,
+        businessId: req.owner.businessId,
         deletedAt: null,
-        assignedTrainerId: { $in: trainers.map(row => row._id) }
-      }).select('_id fullName phone assignedTrainerId').sort({ fullName: 1 }).lean()
+        $or: [
+          { assignedTrainerId: { $in: trainers.map(row => row._id) } },
+          { additionalTrainerIds: { $in: trainers.map(row => row._id) } }
+        ]
+      }).select('_id fullName phone assignedTrainerId additionalTrainerIds').sort({ fullName: 1 }).lean()
       : [];
     const membersByTrainer = new Map();
     for (const member of assignedMembers) {
-      const trainerId = String(member.assignedTrainerId);
-      if (!membersByTrainer.has(trainerId)) membersByTrainer.set(trainerId, []);
-      membersByTrainer.get(trainerId).push({
-        _id: member._id,
-        fullName: member.fullName,
-        phone: member.phone
-      });
+      const trainerIds = new Set([
+        ...(member.assignedTrainerId ? [String(member.assignedTrainerId)] : []),
+        ...(member.additionalTrainerIds || []).map(String)
+      ]);
+      for (const trainerId of trainerIds) {
+        if (!trainers.some(trainer => String(trainer._id) === trainerId)) continue;
+        if (!membersByTrainer.has(trainerId)) membersByTrainer.set(trainerId, []);
+        membersByTrainer.get(trainerId).push({
+          _id: member._id,
+          fullName: member.fullName,
+          phone: member.phone
+        });
+      }
     }
     const reportRows = rows.map(row => ({
       ...row,

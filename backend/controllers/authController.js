@@ -327,7 +327,8 @@ exports.getProfile = async (req, res) => {
         id: business._id,
         businessName: business.businessName,
         businessType: business.businessType,
-        address: business.address
+        address: business.address,
+        logoUrl: business.logoUrl || ''
       },
       session: publicSession(req.session)
     });

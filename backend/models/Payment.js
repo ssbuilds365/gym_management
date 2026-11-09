@@ -28,6 +28,12 @@ const paymentSchema = new mongoose.Schema(
       required: true
     },
 
+    attributedTrainerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TrainerStaff',
+      default: null
+    },
+
     amount: {
       type: Number,
       required: true,
@@ -123,5 +129,6 @@ const paymentSchema = new mongoose.Schema(
 paymentSchema.index({ tenantId: 1, memberId: 1, paymentDate: -1 });
 paymentSchema.index({ tenantId: 1, status: 1 });
 paymentSchema.index({ tenantId: 1, paymentDate: -1 });
+paymentSchema.index({ tenantId: 1, attributedTrainerId: 1, status: 1, paymentDate: -1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

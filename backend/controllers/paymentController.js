@@ -6,6 +6,7 @@ const Member = require('../models/Member');
 const MemberMembership = require('../models/MemberMembership');
 const MembershipPlan = require('../models/MembershipPlan');
 const Business = require('../models/Business');
+const TrainerPTPackage = require('../models/TrainerPTPackage');
 const { toMinorUnits, fromMinorUnits } = require('../utils/currency');
 const { calculateGst, isValidStateCode } = require('../utils/gst');
 const crypto = require('crypto');
@@ -26,6 +27,217 @@ const paymentSummary = (totalFees, totalPaid, transactionAmount) => ({
   pendingAmount: fromMinorUnits(Math.max(0, totalFees - totalPaid)),
   status: getPaymentStatus(totalFees, totalPaid)
 });
+
+exports.getEligiblePaymentMembers = async (req, res) => {
+  const category = String(req.query.category || '');
+  if (!['gym-membership', 'personal-training'].includes(category)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Select a valid payment category'
+    });
+  }
+
+  const tenantId = req.tenantId;
+  const businessId = req.owner.businessId;
+  try {
+    const members = category === 'gym-membership'
+      ? await MemberMembership.aggregate([
+          {
+            $match: {
+              tenantId,
+              businessId,
+              status: { $ne: 'Cancelled' }
+            }
+          },
+          {
+            $lookup: {
+              from: 'members',
+              let: { memberId: '$memberId' },
+              pipeline: [{
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$_id', '$$memberId'] },
+                      { $eq: ['$tenantId', tenantId] },
+                      { $eq: ['$businessId', businessId] },
+                      { $eq: ['$deletedAt', null] }
+                    ]
+                  }
+                }
+              }],
+              as: 'member'
+            }
+          },
+          { $unwind: '$member' },
+          {
+            $lookup: {
+              from: 'payments',
+              let: { membershipId: '$_id' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$tenantId', tenantId] },
+                        { $eq: ['$businessId', businessId] },
+                        { $eq: ['$membershipId', '$$membershipId'] },
+                        { $eq: ['$status', 'Success'] }
+                      ]
+                    }
+                  }
+                },
+                { $group: { _id: null, paidAmount: { $sum: '$amount' } } }
+              ],
+              as: 'ledger'
+            }
+          },
+          {
+            $addFields: {
+              paidAmount: { $ifNull: [{ $arrayElemAt: ['$ledger.paidAmount', 0] }, 0] },
+              pendingAmount: {
+                $max: [
+                  0,
+                  {
+                    $round: [{
+                      $subtract: [
+                        '$planPrice',
+                        { $ifNull: [{ $arrayElemAt: ['$ledger.paidAmount', 0] }, 0] }
+                      ]
+                    }, 2]
+                  }
+                ]
+              }
+            }
+          },
+          { $match: { pendingAmount: { $gt: 0 } } },
+          {
+            $lookup: {
+              from: 'membershipplans',
+              let: { planId: '$planId' },
+              pipeline: [{
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$_id', '$$planId'] },
+                      { $eq: ['$tenantId', tenantId] },
+                      { $eq: ['$businessId', businessId] }
+                    ]
+                  }
+                }
+              }],
+              as: 'plan'
+            }
+          },
+          {
+            $project: {
+              member: { _id: '$member._id', fullName: '$member.fullName', phone: '$member.phone' },
+              membership: {
+                _id: '$_id',
+                planId: {
+                  _id: { $arrayElemAt: ['$plan._id', 0] },
+                  planName: { $arrayElemAt: ['$plan.planName', 0] }
+                },
+                planPrice: '$planPrice',
+                paidAmount: '$paidAmount',
+                pendingAmount: '$pendingAmount',
+                status: '$status',
+                startDate: '$startDate',
+                gstSnapshot: '$gstSnapshot',
+                invoiceNumber: '$invoiceNumber',
+                placeOfSupplyStateCode: '$placeOfSupplyStateCode'
+              }
+            }
+          },
+          { $sort: { 'member.fullName': 1, 'membership.startDate': -1 } },
+          {
+            $group: {
+              _id: '$member._id',
+              fullName: { $first: '$member.fullName' },
+              phone: { $first: '$member.phone' },
+              memberships: { $push: '$membership' }
+            }
+          },
+          {
+            $addFields: {
+              totalFee: { $sum: '$memberships.planPrice' },
+              alreadyPaid: { $sum: '$memberships.paidAmount' },
+              pendingAmount: { $sum: '$memberships.pendingAmount' }
+            }
+          },
+          { $sort: { fullName: 1, _id: 1 } }
+        ])
+      : await TrainerPTPackage.aggregate([
+          {
+            $match: {
+              tenantId,
+              businessId,
+              status: { $ne: 'Cancelled' },
+              $expr: { $gt: ['$totalFeeMinor', '$collectedAmountMinor'] }
+            }
+          },
+          {
+            $lookup: {
+              from: 'members',
+              let: { memberId: '$memberId' },
+              pipeline: [{
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$_id', '$$memberId'] },
+                      { $eq: ['$tenantId', tenantId] },
+                      { $eq: ['$businessId', businessId] },
+                      { $eq: ['$deletedAt', null] }
+                    ]
+                  }
+                }
+              }],
+              as: 'member'
+            }
+          },
+          { $unwind: '$member' },
+          {
+            $project: {
+              member: { _id: '$member._id', fullName: '$member.fullName', phone: '$member.phone' },
+              ptPackage: {
+                _id: '$_id',
+                packageName: '$packageName',
+                packageType: '$packageType',
+                totalFee: { $divide: ['$totalFeeMinor', 100] },
+                alreadyPaid: { $divide: ['$collectedAmountMinor', 100] },
+                pendingAmount: {
+                  $divide: [{ $subtract: ['$totalFeeMinor', '$collectedAmountMinor'] }, 100]
+                }
+              }
+            }
+          },
+          { $sort: { 'member.fullName': 1, 'ptPackage.packageName': 1 } },
+          {
+            $group: {
+              _id: '$member._id',
+              fullName: { $first: '$member.fullName' },
+              phone: { $first: '$member.phone' },
+              ptPackages: { $push: '$ptPackage' }
+            }
+          },
+          {
+            $addFields: {
+              totalFee: { $sum: '$ptPackages.totalFee' },
+              alreadyPaid: { $sum: '$ptPackages.alreadyPaid' },
+              pendingAmount: { $sum: '$ptPackages.pendingAmount' }
+            }
+          },
+          { $sort: { fullName: 1, _id: 1 } }
+        ]);
+
+    return res.json({ success: true, category, members });
+  } catch (error) {
+    console.error('Eligible payment member loading error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load members with outstanding balances'
+    });
+  }
+};
 
 // Create Payment
 exports.createPayment = async (req, res) => {
@@ -310,6 +522,7 @@ exports.createPayment = async (req, res) => {
         businessId: req.owner.businessId,
         memberId,
         membershipId,
+        attributedTrainerId: membership.attributedTrainerId || null,
         amount: fromMinorUnits(paymentCents),
         paymentMethod,
         paymentType: selectedPaymentType,

@@ -52,6 +52,9 @@ test('payment and audit collections are explicitly protected from storage-page d
   );
 
   assert.ok(protectedModels.has('Payment'));
+  assert.ok(protectedModels.has('TrainerAssignment'));
+  assert.ok(protectedModels.has('TrainerPTPackage'));
+  assert.ok(protectedModels.has('TrainerPTPayment'));
   assert.ok(protectedModels.has('ExpenseAudit'));
   assert.ok(protectedModels.has('MemberDeletionAudit'));
 });

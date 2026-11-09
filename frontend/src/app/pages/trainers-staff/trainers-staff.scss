@@ -9,6 +9,12 @@
 .summary-card span { color: #777; font-size: 12px; }
 .summary-card strong { font-size: 25px; }
 .section-panel, .form-panel { background: #fff; border: 1px solid #ededed; border-radius: 12px; padding: 22px; margin-bottom: 20px; }
+.financial-panel .section-heading { align-items: flex-start; }
+.financial-panel .section-heading p { margin: 8px 0 0; font-size: 12px; }
+.financial-category { margin: 12px 0 16px; }
+.financial-category h4 { margin: 0 0 12px; font-size: 14px; }
+.financial-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 0; }
+.financial-table { min-width: 800px; }
 .section-heading { margin-bottom: 16px; }
 .section-heading h3 { margin: 6px 0 0; }
 .form-panel { background: #fafafa; padding: 18px; }
@@ -33,6 +39,7 @@ th { color: #777; font-weight: 700; white-space: nowrap; }
 .danger-link { border: 0; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
 .status { display: inline-block; padding: 4px 8px; border-radius: 20px; background: #e8f7ef; color: #16794b; font-size: 11px; }
 .status.inactive { background: #f1f2f4; color: #666; }
+.status.warning { background: #fff3d6; color: #8a5700; }
 .muted, .loading-message { color: #888; }
 .empty { text-align: center; color: #888; padding: 24px; }
 .success-message { color: #16794b; }
@@ -48,6 +55,26 @@ th { color: #777; font-weight: 700; white-space: nowrap; }
 .designation-summary h4 { margin: 0 0 10px; }
 .overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 18px; background: #0008; }
 .dialog-panel { width: min(760px, 100%); max-height: 90vh; overflow: auto; padding: 22px; border-radius: 12px; background: #fff; box-shadow: 0 15px 50px #0003; }
+.pt-dialog { width: min(1050px, 100%); }
+.pt-package-card { margin: 16px 0; padding: 16px; border: 1px solid #e8e8ec; border-radius: 10px; }
+.pt-package-heading, .pt-payment-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pt-package-heading h4, .pt-payment-history h5, .pt-payment-form h5, .pt-refund-form h5 { margin: 0 0 7px; }
+.pt-package-heading p, .pt-payment-form p { margin: 0; color: #777; font-size: 12px; }
+.pt-balance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px 0; }
+.pt-balance-grid span { display: grid; gap: 5px; color: #777; font-size: 11px; }
+.pt-balance-grid strong { color: #222; font-size: 14px; }
+.pt-payment-form, .pt-refund-form { margin-top: 14px; }
+.pt-payment-history { margin-top: 16px; }
+.pt-payment-row { justify-content: flex-start; padding: 10px 0; border-top: 1px solid #eee; font-size: 12px; }
+.pt-payment-row > span { color: #777; }
+.pt-payment-row > strong { color: #222; }
+.pt-payment-row .pt-refund-form { flex-basis: 100%; }
+.pt-payment-details { flex-basis: 100%; padding: 12px; border-radius: 8px; background: #fafafa; }
+.pt-payment-details > p { margin: 0 0 10px; color: #666; font-size: 12px; }
+.status.paid { background: #e8f7ef; color: #16794b; }
+.status.partial, .status.pending { background: #fff3d6; color: #8a5700; }
+.status.refunded { background: #f1f2f4; color: #555; }
+.status.failed { background: #fff0ef; color: #b42318; }
 .assignment-form { align-items: end; margin: 18px 0; }
 .assignment-form label { flex: 1; }
 .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
@@ -58,8 +85,11 @@ th { color: #777; font-weight: 700; white-space: nowrap; }
   .summary-grid, .form-grid { grid-template-columns: 1fr; }
   .page-heading, .section-heading { align-items: flex-start; }
   .section-panel { padding: 16px; }
+  .financial-summary-grid { grid-template-columns: 1fr; }
   .directory-tools, .report-actions, .assignment-form { align-items: stretch; flex-direction: column; }
   .directory-tools > *, .report-actions > div, .assignment-form > * { width: 100%; }
   .report-actions > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pagination { justify-content: center; flex-wrap: wrap; }
+  .pt-balance-grid { grid-template-columns: 1fr; }
+  .pt-package-heading { align-items: flex-start; }
 }

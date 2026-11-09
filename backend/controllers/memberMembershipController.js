@@ -4,6 +4,7 @@ const Member = require('../models/Member');
 const MembershipPlan = require('../models/MembershipPlan');
 const Business = require('../models/Business');
 const Payment = require('../models/Payment');
+const TrainerStaff = require('../models/TrainerStaff');
 const { toMinorUnits, fromMinorUnits } = require('../utils/currency');
 const { calculateGst } = require('../utils/gst');
 const {
@@ -159,6 +160,14 @@ const assignMembership = async (req, res) => {
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
       memberId: member._id,
+      attributedTrainerId: member.assignedTrainerId &&
+        await TrainerStaff.exists({
+          _id: member.assignedTrainerId,
+          tenantId: req.tenantId,
+          role: 'Trainer'
+        })
+        ? member.assignedTrainerId
+        : null,
       planId: plan._id,
       startDate: membershipStartDate,
       endDate,

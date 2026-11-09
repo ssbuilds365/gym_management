@@ -13,6 +13,9 @@ const MemberMembership = require('../models/MemberMembership');
 const MembershipPlan = require('../models/MembershipPlan');
 const Payment = require('../models/Payment');
 const TrainerStaff = require('../models/TrainerStaff');
+const TrainerAssignment = require('../models/TrainerAssignment');
+const TrainerPTPackage = require('../models/TrainerPTPackage');
+const TrainerPTPayment = require('../models/TrainerPTPayment');
 const config = require('../config/env');
 const { getAtlasStorage } = require('../services/atlasStorage');
 const { localDateTimeToUtc } = require('../utils/dashboardPeriods');
@@ -83,6 +86,27 @@ const collectionDefinitions = [
     managementCategory: 'trainersStaff',
     protected: false,
     protectionReason: ''
+  },
+  {
+    model: TrainerAssignment,
+    managementMenu: 'Trainers & Staff',
+    managementCategory: null,
+    protected: true,
+    protectionReason: 'Trainer assignment history is retained and cannot be deleted from Database Storage.'
+  },
+  {
+    model: TrainerPTPackage,
+    managementMenu: 'Trainers & Staff',
+    managementCategory: null,
+    protected: true,
+    protectionReason: 'Personal training package and financial history is managed through trainer workflows.'
+  },
+  {
+    model: TrainerPTPayment,
+    managementMenu: 'Trainers & Staff',
+    managementCategory: null,
+    protected: true,
+    protectionReason: 'Personal training payment and refund history is retained and cannot be deleted from Database Storage.'
   },
   {
     model: BiometricEnrollment,

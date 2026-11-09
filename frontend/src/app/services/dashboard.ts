@@ -21,6 +21,13 @@ export class DashboardService {
     );
   }
 
+  getTodaysBirthdays(): Observable<any> {
+    return this.http.get(
+      `${this.apiUrl}/todays-birthdays`,
+      { params: { _cacheBust: Date.now() } }
+    );
+  }
+
   getMembershipExpiry(filters: {
     status?: string;
     search?: string;

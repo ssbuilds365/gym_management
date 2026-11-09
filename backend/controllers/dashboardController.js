@@ -3,7 +3,7 @@ const Attendance = require('../models/Attendance');
 const MemberMembership = require('../models/MemberMembership');
 const Payment = require('../models/Payment');
 const Business = require('../models/Business');
-const { getDashboardPeriods } = require('../utils/dashboardPeriods');
+const { getDashboardPeriods, getLocalDateParts } = require('../utils/dashboardPeriods');
 const {
   isValidTimeZone,
   DEFAULT_TIME_ZONE
@@ -177,6 +177,7 @@ exports.getDashboardStats = async (req, res) => {
         }),
         revenue: month?.revenue || 0
       };
+
     });
     const currentPeriodCollection =
       paymentCollections.find((item) => item._id === monthlyRevenue.at(-1)?.key);
@@ -206,6 +207,72 @@ exports.getDashboardStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dashboard statistics'
+    });
+  }
+};
+
+exports.getTodaysBirthdays = async (req, res) => {
+  try {
+    const business = await Business.findOne({ _id: req.tenantId })
+      .select('timeZone')
+      .lean();
+    if (!business) {
+      return res.status(404).json({ success: false, message: 'Business not found' });
+    }
+
+    const timeZone = isValidTimeZone(business.timeZone)
+      ? business.timeZone
+      : DEFAULT_TIME_ZONE;
+    const today = getLocalDateParts(new Date(), timeZone);
+    const members = await Member.aggregate([
+      {
+        $match: {
+          tenantId: req.tenantId,
+          businessId: req.owner.businessId,
+          deletedAt: null,
+          dateOfBirth: { $type: 'date' }
+        }
+      },
+      {
+        $addFields: {
+          birthdayParts: {
+            $dateToParts: { date: '$dateOfBirth', timezone: 'UTC' }
+          }
+        }
+      },
+      {
+        $match: {
+          'birthdayParts.month': today.month,
+          'birthdayParts.day': today.day
+        }
+      },
+      { $sort: { fullName: 1, _id: 1 } },
+      {
+        $project: {
+          fullName: 1,
+          phone: 1,
+          dateOfBirth: 1
+        }
+      }
+    ]);
+
+    return res.json({
+      success: true,
+      date: `${today.year}-${String(today.month).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`,
+      timeZone,
+      count: members.length,
+      members: members.map(member => ({
+        _id: member._id,
+        fullName: member.fullName,
+        phone: member.phone,
+        age: today.year - new Date(member.dateOfBirth).getUTCFullYear()
+      }))
+    });
+  } catch (error) {
+    console.error('Dashboard birthdays error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load today’s birthdays'
     });
   }
 };

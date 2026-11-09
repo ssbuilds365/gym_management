@@ -19,7 +19,7 @@ interface ExpenseRecord {
   amount: number;
   paidAmount: number;
   outstandingAmount: number;
-  status: 'PAID' | 'PENDING' | 'PARTIALLY_PAID';
+  status: 'PAID' | 'PENDING' | 'PARTIAL' | 'PARTIALLY_PAID';
   paymentMethod: string | null;
   expenseDate: string;
   vendor: string;
@@ -31,11 +31,13 @@ interface ExpenseRecord {
   archivedAt?: string | null;
   receipt?: { originalName: string; uploadedAt: string } | null;
   payments: Array<{
+    _id?: string;
     amount: number;
     paymentMethod: string;
     paidAt: string;
     reference: string;
     notes: string;
+    recordedBy?: { _id?: string; name?: string } | string;
   }>;
 }
 
@@ -88,6 +90,11 @@ export class ExpenseTracker implements OnInit, OnDestroy {
 
   showDetails = false;
   selectedExpense: ExpenseRecord | null = null;
+  showPaymentForm = false;
+  paymentExpense: ExpenseRecord | null = null;
+  paymentSaving = false;
+  paymentError = '';
+  paymentForm = this.emptyPaymentForm();
   showCategoryManager = false;
   showCategoryForm = false;
   editingCategory: ExpenseCategory | null = null;
@@ -138,15 +145,26 @@ export class ExpenseTracker implements OnInit, OnDestroy {
       expenseDate: this.businessToday(),
       dueDate: '',
       notes: '',
-      paymentAmount: '',
-      paymentDate: this.businessToday(),
-      paymentMethod: 'Cash',
-      paymentReference: '',
       vendor: '',
       invoiceNumber: '',
       transactionReference: '',
-      description: '',
-      paymentNotes: ''
+      description: ''
+    };
+  }
+
+  private emptyPaymentForm(): {
+    amount: number | null;
+    paymentDate: string;
+    paymentMethod: string;
+    reference: string;
+    notes: string;
+  } {
+    return {
+      amount: null,
+      paymentDate: this.businessToday(),
+      paymentMethod: 'Cash',
+      reference: '',
+      notes: ''
     };
   }
 
@@ -262,15 +280,10 @@ export class ExpenseTracker implements OnInit, OnDestroy {
       expenseDate: this.expenseDateInput(expense.expenseDate),
       dueDate: expense.dueDate ? this.expenseDateInput(expense.dueDate) : '',
       notes: expense.notes || '',
-      paymentAmount: '',
-      paymentDate: this.businessToday(),
-      paymentMethod: expense.paymentMethod || 'Cash',
-      paymentReference: '',
       vendor: expense.vendor,
       invoiceNumber: expense.invoiceNumber,
       transactionReference: expense.transactionReference,
-      description: expense.description,
-      paymentNotes: ''
+      description: expense.description
     };
     this.formError = '';
     this.showForm = true;
@@ -300,21 +313,8 @@ export class ExpenseTracker implements OnInit, OnDestroy {
 
     this.saving = true;
     const editingExpense = this.editingExpense;
-    if (editingExpense && Number(this.form.paymentAmount) > 0 && !this.paymentRequestId) {
-      this.paymentRequestId = crypto.randomUUID();
-    }
     const request = editingExpense
       ? this.expenseService.update(editingExpense._id, payload).pipe(
-          switchMap(response => Number(this.form.paymentAmount) > 0
-            ? this.expenseService.recordPayment(editingExpense._id, {
-                amount: Number(this.form.paymentAmount),
-                paymentMethod: this.form.paymentMethod,
-                paymentDate: this.form.paymentDate,
-                reference: this.form.paymentReference,
-                notes: this.form.paymentNotes,
-                requestId: this.paymentRequestId
-              })
-            : of(response)),
           switchMap(response => this.receiptFile
             ? this.expenseService.uploadReceipt(editingExpense._id, this.receiptFile)
             : of(response))
@@ -348,10 +348,77 @@ export class ExpenseTracker implements OnInit, OnDestroy {
         error: error => {
           console.error('Expense save error:', error);
           this.formError = error.error?.message || error.message || 'Unable to save expense.';
-          if (this.editingExpense) {
-            this.successMessage = 'Expense details were saved, but the receipt or payment step failed. You can retry safely.';
-            this.loadExpenses(1);
+          if (this.editingExpense) this.loadExpenses(1);
+        }
+      });
+  }
+
+  openPaymentForm(expense: ExpenseRecord): void {
+    if (expense.outstandingAmount <= 0 || this.paymentSaving) return;
+    this.paymentExpense = expense;
+    this.paymentForm = {
+      ...this.emptyPaymentForm(),
+      amount: expense.outstandingAmount,
+      paymentMethod: expense.paymentMethod || 'Cash'
+    };
+    this.paymentRequestId = crypto.randomUUID();
+    this.paymentError = '';
+    this.showPaymentForm = true;
+  }
+
+  closePaymentForm(): void {
+    if (this.paymentSaving) return;
+    this.showPaymentForm = false;
+    this.paymentExpense = null;
+    this.paymentError = '';
+    this.paymentRequestId = '';
+  }
+
+  recordPayment(): void {
+    const expense = this.paymentExpense;
+    if (!expense || this.paymentSaving) return;
+    const amount = Number(this.paymentForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > expense.outstandingAmount) {
+      this.paymentError = 'Payment must be greater than zero and cannot exceed the remaining balance.';
+      return;
+    }
+    if (!this.paymentRequestId) this.paymentRequestId = crypto.randomUUID();
+    this.paymentSaving = true;
+    this.paymentError = '';
+    this.expenseService.recordPayment(expense._id, {
+      amount,
+      paymentMethod: this.paymentForm.paymentMethod,
+      paymentDate: this.paymentForm.paymentDate,
+      reference: this.paymentForm.reference,
+      notes: this.paymentForm.notes,
+      requestId: this.paymentRequestId
+    }, this.query(1))
+      .pipe(finalize(() => {
+        this.paymentSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          if (!response?.success || !response.expense) {
+            this.paymentError = 'The server did not confirm the expense payment.';
+            return;
           }
+          const updatedExpense = response.expense as ExpenseRecord;
+          this.expenses = this.expenses.map(item =>
+            item._id === updatedExpense._id ? updatedExpense : item
+          );
+          this.selectedExpense = this.selectedExpense?._id === updatedExpense._id
+            ? updatedExpense
+            : this.selectedExpense;
+          if (response.summary) this.summary = response.summary;
+          this.showPaymentForm = false;
+          this.paymentExpense = null;
+          this.paymentRequestId = '';
+          this.successMessage = 'Expense payment recorded.';
+        },
+        error: error => {
+          console.error('Expense payment error:', error);
+          this.paymentError = error.error?.message || 'Unable to record expense payment.';
         }
       });
   }
@@ -490,6 +557,13 @@ export class ExpenseTracker implements OnInit, OnDestroy {
   openDetails(expense: ExpenseRecord): void {
     this.selectedExpense = expense;
     this.showDetails = true;
+  }
+
+  recordedByName(payment: ExpenseRecord['payments'][number]): string {
+    if (payment.recordedBy && typeof payment.recordedBy === 'object') {
+      return payment.recordedBy.name || 'Owner';
+    }
+    return payment.recordedBy ? 'Owner' : '—';
   }
 
   openCategoryManager(): void {
@@ -793,10 +867,6 @@ export class ExpenseTracker implements OnInit, OnDestroy {
 
   get activeCategories(): ExpenseCategory[] {
     return this.categories.filter(category => category.isActive);
-  }
-
-  hasPaymentAmount(): boolean {
-    return Number(this.form.paymentAmount) > 0;
   }
 
   get reportTitle(): string {

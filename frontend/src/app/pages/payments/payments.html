@@ -91,66 +91,94 @@
 
       <div class="form-grid">
 
+        <div class="form-group">
+          <label>Payment Category *</label>
+          <select name="paymentCategory" [(ngModel)]="paymentCategory" (ngModelChange)="onPaymentCategoryChange()">
+            <option value="gym-membership">Gym Membership Fee</option>
+            <option value="personal-training">Personal Training Fee</option>
+          </select>
+        </div>
+
         <!-- Member -->
         <div class="form-group">
-          <label>Select Member *</label>
+          <label>Search eligible members</label>
+          <input type="search" name="memberSearch" [(ngModel)]="memberSearch" placeholder="Search name, member ID or mobile">
+        </div>
+
+        <div class="form-group">
+          <label>Select Member with Pending {{ paymentCategory === 'gym-membership' ? 'Membership' : 'PT' }} Fee *</label>
 
           <select name="memberId" [(ngModel)]="selectedMemberId" (ngModelChange)="onMemberChange()" required>
 
             <option value="">Choose Member</option>
 
-            <option *ngFor="let member of members" [value]="member._id">
-              {{ member.fullName }} - {{ member.phone }}
+            <option *ngFor="let member of filteredMembers" [value]="member._id">
+              {{ member.fullName }} · ID {{ member._id.slice(-6).toUpperCase() }} · {{ member.phone }}
+              · Fee ₹{{ member.totalFee | number:'1.2-2' }} · Paid ₹{{ member.alreadyPaid | number:'1.2-2' }}
+              · Pending ₹{{ member.pendingAmount | number:'1.2-2' }}
             </option>
 
           </select>
 
           <small *ngIf="membersLoading">Loading members...</small>
           <small *ngIf="!membersLoading && members.length === 0">
-            No active members found.
+            No members have outstanding balances in this category.
+          </small>
+          <small *ngIf="!membersLoading && members.length > 0 && filteredMembers.length === 0">
+            No eligible members match your search.
           </small>
         </div>
 
         <!-- Membership -->
-        <div class="form-group">
+        <div class="form-group" *ngIf="paymentCategory === 'gym-membership'">
           <label>Select Membership *</label>
 
           <select name="membershipId" [(ngModel)]="selectedMembershipId" (ngModelChange)="onMembershipChange()"
-            [disabled]="!selectedMemberId || membershipsLoading" required>
+            [disabled]="!selectedMemberId" required>
 
             <option value="">Choose Membership</option>
 
             <option *ngFor="let membership of memberships" [value]="membership._id">
 
-              {{ membership.planId?.planName || 'Membership Plan' }}
+              {{ membership.planId?.planName || 'Membership Plan' }} · Pending ₹{{ membership.pendingAmount | number:'1.2-2' }}
               - {{ membership.status }}
 
             </option>
 
           </select>
 
-          <small *ngIf="membershipsLoading">
-            Loading memberships...
-          </small>
-
-          <small *ngIf="selectedMemberId && !membershipsLoading && memberships.length === 0">
+          <small *ngIf="selectedMemberId && memberships.length === 0">
             No membership with pending fees found.
           </small>
+        </div>
+
+        <div class="form-group" *ngIf="paymentCategory === 'personal-training'">
+          <label>Select PT Package *</label>
+          <select name="ptPackageId" [(ngModel)]="selectedPTPackageId" (ngModelChange)="onPTPackageChange()"
+            [disabled]="!selectedMemberId" required>
+            <option value="">Choose PT package</option>
+            <option *ngFor="let ptPackage of ptPackages" [value]="ptPackage._id">
+              {{ ptPackage.packageName }} · Fee ₹{{ ptPackage.totalFee | number:'1.2-2' }}
+              · Paid ₹{{ ptPackage.alreadyPaid | number:'1.2-2' }}
+              · Pending ₹{{ ptPackage.pendingAmount | number:'1.2-2' }}
+            </option>
+          </select>
+          <small *ngIf="selectedMemberId && ptPackages.length === 0">No PT package with pending fees found.</small>
         </div>
 
       </div>
 
       <!-- Membership Summary -->
-      <div class="membership-summary" *ngIf="selectedMembership">
+      <div class="membership-summary" *ngIf="selectedMembership || selectedPTPackage">
 
         <div>
-          <span>Total Membership Fees</span>
-          <strong>₹{{ selectedMembership.planPrice | number:'1.2-2' }}</strong>
+          <span>Total {{ paymentCategory === 'gym-membership' ? 'Membership' : 'PT Package' }} Fees</span>
+          <strong>₹{{ (selectedMembership?.planPrice ?? selectedPTPackage?.totalFee) | number:'1.2-2' }}</strong>
         </div>
 
         <div>
           <span>Already Paid</span>
-          <strong>₹{{ selectedMembership.paidAmount | number:'1.2-2' }}</strong>
+          <strong>₹{{ (selectedMembership?.paidAmount ?? selectedPTPackage?.alreadyPaid) | number:'1.2-2' }}</strong>
         </div>
 
         <div>
@@ -161,7 +189,7 @@
         </div>
 
       </div>
-      <small *ngIf="selectedMembership?.gstSnapshot?.enabled">
+      <small *ngIf="paymentCategory === 'gym-membership' && selectedMembership?.gstSnapshot?.enabled">
         Taxable amount: ₹{{ selectedMembership.gstSnapshot.taxableAmount | number:'1.2-2' }}
         · GST {{ selectedMembership.gstSnapshot.gstPercentage }}%
         · {{ selectedMembership.gstSnapshot.taxInclusive ? 'Inclusive' : 'Exclusive' }}
@@ -175,6 +203,10 @@
 
           <input type="number" name="amount" [(ngModel)]="paymentForm.amount" min="0.01" [max]="pendingAmount"
             step="0.01" placeholder="Enter payment amount" required>
+          <small class="amount-validation"
+            *ngIf="paymentForm.amount === 0 || paymentForm.amount > pendingAmount">
+            Enter an amount greater than zero and no more than the outstanding balance of ₹{{ pendingAmount | number:'1.2-2' }}.
+          </small>
         </div>
 
         <!-- Payment Method -->
@@ -187,13 +219,14 @@
             <option value="UPI">UPI</option>
             <option value="Card">Card</option>
             <option value="Bank Transfer">Bank Transfer</option>
-            <option value="Razorpay">Razorpay</option>
+            <option value="Razorpay" *ngIf="paymentCategory === 'gym-membership'">Razorpay</option>
+            <option value="Other" *ngIf="paymentCategory === 'personal-training'">Other</option>
 
           </select>
         </div>
 
         <!-- Payment Type -->
-        <div class="form-group">
+        <div class="form-group" *ngIf="paymentCategory === 'gym-membership'">
           <label>Payment Type</label>
 
           <select name="paymentType" [(ngModel)]="paymentForm.paymentType">
@@ -214,7 +247,7 @@
 
         <!-- Transaction ID -->
         <div class="form-group">
-          <label>Transaction ID</label>
+          <label>{{ paymentCategory === 'gym-membership' ? 'Transaction ID' : 'Transaction Reference' }}</label>
 
           <input type="text" name="transactionId" [(ngModel)]="paymentForm.transactionId"
             placeholder="Optional transaction reference">
@@ -250,7 +283,8 @@
           Cancel
         </button>
 
-        <button type="submit" class="primary-btn" [disabled]="savingPayment || !selectedMembership">
+        <button type="submit" class="primary-btn"
+          [disabled]="savingPayment || paymentNgForm.invalid || !canSubmitPayment">
 
           {{ savingPayment ? 'Saving Payment...' : '✓ Collect Payment' }}
 

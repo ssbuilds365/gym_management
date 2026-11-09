@@ -50,7 +50,7 @@ const expenseSnapshot = expense => ({
   category: expense.category,
   amountMinor: expense.amountMinor,
   paidAmountMinor: expense.paidAmountMinor,
-  status: expense.status,
+  status: expense.status === 'PARTIALLY_PAID' ? 'PARTIAL' : expense.status,
   expenseDate: expense.expenseDate,
   vendor: expense.vendor,
   invoiceNumber: expense.invoiceNumber,
@@ -64,7 +64,7 @@ const expenseSnapshot = expense => ({
     reference: payment.reference,
     notes: payment.notes,
     requestId: payment.requestId,
-    recordedBy: payment.recordedBy
+    recordedBy: payment.recordedBy?._id || payment.recordedBy
   })),
   dueDate: expense.dueDate,
   notes: expense.notes,
@@ -79,7 +79,7 @@ const serializeExpense = expense => ({
   amount: expense.amountMinor / 100,
   paidAmount: expense.paidAmountMinor / 100,
   outstandingAmount: Math.max(0, expense.amountMinor - expense.paidAmountMinor) / 100,
-  status: expense.status,
+  status: expense.status === 'PARTIALLY_PAID' ? 'PARTIAL' : expense.status,
   paymentMethod: expense.paymentMethod,
   expenseDate: expense.expenseDate,
   vendor: expense.vendor,
@@ -102,7 +102,12 @@ const serializeExpense = expense => ({
     paidAt: payment.paidAt,
     reference: payment.reference,
     notes: payment.notes,
-    recordedBy: payment.recordedBy
+    recordedBy: payment.recordedBy && typeof payment.recordedBy === 'object'
+      ? {
+          _id: payment.recordedBy._id,
+          name: payment.recordedBy.name || ''
+        }
+      : payment.recordedBy,
   })),
   createdAt: expense.createdAt,
   updatedAt: expense.updatedAt

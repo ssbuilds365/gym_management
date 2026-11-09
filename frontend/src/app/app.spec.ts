@@ -8,7 +8,10 @@ import { SessionActivityService } from './services/session-activity';
 import { MembershipPlanService } from './services/membership-plan';
 
 describe('App', () => {
+  let windowOpen: ReturnType<typeof vi.spyOn>;
+
   beforeEach(async () => {
+    windowOpen = vi.spyOn(window, 'open').mockReturnValue(null);
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [
@@ -34,6 +37,7 @@ describe('App', () => {
           useValue: {
             refreshRequested$: new Subject<void>(),
             getDashboardStats: () => of({ success: true, stats: {} }),
+            getTodaysBirthdays: () => of({ success: true, count: 0, members: [] }),
             getMembershipExpiry: () => of({
               success: true,
               expiringNext7DaysCount: 0,
@@ -97,5 +101,43 @@ describe('App', () => {
 
     expect(fixture.nativeElement.textContent).not.toContain('Subscription Status');
     expect(fixture.nativeElement.textContent).not.toContain('View Subscription');
+  });
+
+  it('opens WhatsApp with a personalized message for a valid Indian number', () => {
+    const fixture = TestBed.createComponent(App);
+    const member = { fullName: "Asha O'Neil & Co.", phone: '98765-43210' };
+
+    fixture.componentInstance.sendBirthdayWhatsApp(member);
+
+    const [url, target] = windowOpen.mock.calls[0];
+    expect(target).toBe('_blank');
+    expect(url).toContain('https://wa.me/919876543210?text=');
+    const message = decodeURIComponent(String(url).split('?text=')[1]);
+    expect(message).toContain("Happy Birthday, Asha O'Neil & Co.!");
+    expect(message).toContain('Stay Fit. Stay Strong.');
+  });
+
+  it('normalizes +91 and 91 phone formats without duplicating the country code', () => {
+    const fixture = TestBed.createComponent(App);
+
+    fixture.componentInstance.sendBirthdayWhatsApp({ fullName: 'Member One', phone: '+91 (98765) 43210' });
+    fixture.componentInstance.sendBirthdayWhatsApp({ fullName: 'Member Two', phone: '91-98765-43210' });
+
+    expect(windowOpen.mock.calls[0][0]).toContain('https://wa.me/919876543210?');
+    expect(windowOpen.mock.calls[1][0]).toContain('https://wa.me/919876543210?');
+  });
+
+  it('does not open WhatsApp for missing or invalid mobile numbers', () => {
+    const fixture = TestBed.createComponent(App);
+    windowOpen.mockClear();
+
+    fixture.componentInstance.sendBirthdayWhatsApp({ fullName: 'Member One', phone: '' });
+    expect(fixture.componentInstance.birthdayActionError)
+      .toBe('This member does not have a valid WhatsApp mobile number.');
+    fixture.componentInstance.sendBirthdayWhatsApp({ fullName: 'Member Two', phone: '12345' });
+
+    expect(windowOpen).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.birthdayActionError)
+      .toBe('This member does not have a valid WhatsApp mobile number.');
   });
 });

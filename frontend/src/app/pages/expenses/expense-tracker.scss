@@ -300,6 +300,11 @@ td:nth-child(n + 6):nth-child(-n + 8) {
   background: #eaf0ff;
 }
 
+.status-badge.partial {
+  color: #3056a2;
+  background: #eaf0ff;
+}
+
 .row-actions {
   display: flex;
   gap: 5px;
@@ -476,7 +481,7 @@ td:nth-child(n + 6):nth-child(-n + 8) {
 
 .payment-history > div {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px 12px;
   border-bottom: 1px solid #eceef1;
   padding: 10px 0;
@@ -486,6 +491,36 @@ td:nth-child(n + 6):nth-child(-n + 8) {
 .payment-history small {
   grid-column: 1 / -1;
   color: #737987;
+}
+
+.payment-history strong {
+  margin-right: 5px;
+  color: #555b68;
+}
+
+.payment-confirmation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 14px 0 20px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f7f8fa;
+}
+
+.payment-confirmation dt {
+  color: #737987;
+  font-size: 11px;
+}
+
+.payment-confirmation dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.payment-modal .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .category-modal {
@@ -880,6 +915,10 @@ th {
 
 @media (max-width: 620px) {
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .payment-modal .form-grid,
+  .payment-confirmation {
     grid-template-columns: 1fr;
   }
 

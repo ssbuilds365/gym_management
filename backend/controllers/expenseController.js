@@ -29,7 +29,7 @@ cloudinary.config({
   secure: true
 });
 
-const VALID_STATUSES = ['PAID', 'PENDING', 'PARTIALLY_PAID'];
+const VALID_STATUSES = ['PAID', 'PENDING', 'PARTIAL', 'PARTIALLY_PAID'];
 const SORT_FIELDS = {
   expenseDate: 'expenseDate',
   title: 'title',
@@ -86,7 +86,9 @@ const buildExpenseFilter = ({ tenantId, businessId, query, range }) => {
 
   if (query.category) filter.category = String(query.category).trim().slice(0, 80);
   if (query.status && VALID_STATUSES.includes(String(query.status))) {
-    filter.status = String(query.status);
+    filter.status = String(query.status) === 'PARTIAL'
+      ? { $in: ['PARTIAL', 'PARTIALLY_PAID'] }
+      : String(query.status);
   }
   const search = String(query.search || '').trim().slice(0, 100);
   if (search) {
@@ -224,6 +226,7 @@ const resolveSummary = async ({ tenantId, businessId, query, selectedRange, time
     totalExpenses: selectedTotals.totalMinor / 100,
     paidExpenses: selectedTotals.paidMinor / 100,
     pendingExpenses: Math.max(0, selectedTotals.totalMinor - selectedTotals.paidMinor) / 100,
+    outstandingAmount: Math.max(0, selectedTotals.totalMinor - selectedTotals.paidMinor) / 100,
     thisMonthExpenses: monthTotals.totalMinor / 100,
     todayExpenses: todayTotals.totalMinor / 100,
     highestExpenseCategory: categoryRows[0]
@@ -271,6 +274,7 @@ exports.listExpenses = async (req, res) => {
     const { page, limit, sort } = getListParameters(req.query);
     const [rows, total, summary] = await Promise.all([
       Expense.find(filter)
+        .populate('payments.recordedBy', 'name')
         .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
@@ -306,7 +310,7 @@ exports.getExpense = async (req, res) => {
       _id: req.params.id,
       tenantId: req.tenantId,
       businessId: req.owner.businessId
-    }).lean();
+    }).populate('payments.recordedBy', 'name').lean();
     if (!expense) return res.status(404).json({ success: false, message: 'Expense not found' });
     return res.json({ success: true, expense: serializeExpense(expense) });
   } catch (error) {
@@ -550,12 +554,21 @@ exports.recordExpensePayment = async (req, res) => {
     return res.status(400).json({ success: false, message: 'A valid payment request ID is required.' });
   }
 
-  const session = await mongoose.startSession();
+  let session;
   try {
+    session = await mongoose.startSession();
     const business = await getBusiness(req);
     if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
+    const timeZone = getBusinessTimeZone(business);
+    const selectedRange = resolveRange(req.query, timeZone);
+    if (
+      (req.query.period && req.query.period !== 'all' || req.query.from || req.query.to) &&
+      !selectedRange
+    ) {
+      return res.status(400).json({ success: false, message: 'Select a valid expense date range' });
+    }
     const paidAt = req.body.paymentDate
-      ? parseExpenseDate(req.body.paymentDate, getBusinessTimeZone(business))
+      ? parseExpenseDate(req.body.paymentDate, timeZone)
       : new Date();
     if (!paidAt) return res.status(400).json({ success: false, message: 'Enter a valid payment date.' });
 
@@ -619,10 +632,20 @@ exports.recordExpensePayment = async (req, res) => {
       updated = expense;
     });
     if (!updated) return res.status(404).json({ success: false, message: 'Active expense not found' });
+    await updated.populate('payments.recordedBy', 'name');
+    const summary = await resolveSummary({
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      query: req.query,
+      selectedRange,
+      timeZone,
+      now: new Date()
+    });
     return res.json({
       success: true,
       duplicate,
-      expense: serializeExpense(updated)
+      expense: serializeExpense(updated),
+      summary
     });
   } catch (error) {
     if (error.status === 400 || error.status === 409) {
@@ -631,7 +654,7 @@ exports.recordExpensePayment = async (req, res) => {
     console.error('Record expense payment error:', error);
     return res.status(500).json({ success: false, message: 'Unable to record expense payment' });
   } finally {
-    await session.endSession();
+    if (session) await session.endSession();
   }
 };
 

@@ -15,6 +15,59 @@
     <article class="summary-card"><span>Active Staff</span><strong>{{ activeStaffTotal }}</strong></article>
   </div>
 
+  <section class="section-panel financial-panel">
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow">ALL-TIME RECORDED VALUES</span>
+        <h3>Trainer Financial Performance</h3>
+        <p class="muted">Personal training package collections and balances.</p>
+      </div>
+      <button class="secondary-btn" type="button" (click)="loadFinancialPerformance()" [disabled]="financialLoading">
+        {{ financialLoading ? 'Refreshing…' : 'Refresh financials' }}
+      </button>
+    </div>
+
+    <p class="error-message" *ngIf="financialError" role="alert">{{ financialError }}</p>
+    <p class="loading-message" *ngIf="financialLoading">Loading trainer financial data…</p>
+
+    <ng-container *ngIf="!financialLoading && financialSummary as totals">
+      <div class="financial-category">
+        <h4>Personal Training · package ledger</h4>
+        <div class="summary-grid financial-summary-grid">
+          <article class="summary-card"><span>PT Expected</span><strong>{{ formatCurrency(totals['ptExpected']) }}</strong></article>
+          <article class="summary-card"><span>PT Collected</span><strong>{{ formatCurrency(totals['ptCollected']) }}</strong></article>
+          <article class="summary-card"><span>PT Pending</span><strong>{{ formatCurrency(totals['ptPending']) }}</strong></article>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table class="financial-table">
+          <thead>
+            <tr>
+              <th>Trainer</th><th>Unique Clients</th><th>Active PT Clients</th>
+              <th>PT Expected</th><th>PT Collected</th><th>PT Pending</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of financialTrainers">
+              <td>{{ row.trainer.name }} <span class="status" [class.inactive]="row.trainer.status !== 'Active'">{{ row.trainer.status }}</span></td>
+              <td>{{ row.clients.totalUniqueAssigned }}</td>
+              <td>{{ row.clients.activePTClients }}</td>
+              <td>{{ formatCurrency(row.personalTraining.expected) }}</td>
+              <td>{{ formatCurrency(row.personalTraining.collected) }}</td>
+              <td>{{ formatCurrency(row.personalTraining.pending) }}</td>
+            </tr>
+            <tr *ngIf="!financialTrainers.length"><td colspan="6" class="empty">No trainers have been added.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="report-notes">
+        <p *ngFor="let note of financialLimitations">{{ note }}</p>
+        <p>These are all-time totals. Expected/pending represent PT package value not covered by successful payments.</p>
+      </div>
+    </ng-container>
+  </section>
+
   <p class="success-message" *ngIf="successMessage" role="status">{{ successMessage }}</p>
   <p class="error-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
 
@@ -33,6 +86,7 @@
         <label>Phone Number *<input name="trainerPhone" [(ngModel)]="trainerForm.phone" type="tel" maxlength="30" required></label>
         <label>Email<input name="trainerEmail" [(ngModel)]="trainerForm.email" type="email"></label>
         <label>Specialization<input name="trainerSpecialization" [(ngModel)]="trainerForm.specialization" maxlength="120"></label>
+        <label>Maximum client capacity<input name="trainerCapacity" [(ngModel)]="trainerForm.maxClientCapacity" type="number" min="1" step="1"></label>
         <label>Joining Date *<input name="trainerJoiningDate" [(ngModel)]="trainerForm.joiningDate" type="date" required></label>
         <label>Salary / Commission<input name="trainerSalary" [(ngModel)]="trainerForm.salaryAmount" type="number" min="0" step="0.01"></label>
         <label>Compensation Type
@@ -66,12 +120,17 @@
         <tbody>
           <tr *ngFor="let trainer of trainers">
             <td>{{ trainer.name }}</td><td>{{ trainer.phone }}</td><td>{{ trainer.email || '—' }}</td>
-            <td>{{ trainer.specialization || '—' }}</td><td>{{ trainer.assignedMemberCount || 0 }}</td>
+            <td>{{ trainer.specialization || '—' }}</td>
+            <td>
+              {{ trainer.assignedMemberCount || 0 }} / {{ trainer.maxClientCapacity || 'No limit' }}
+              <span class="status warning" *ngIf="trainer.maxClientCapacity && (trainer.assignedMemberCount || 0) >= trainer.maxClientCapacity">At capacity</span>
+            </td>
             <td class="muted">Not tracked</td><td><span class="status" [class.inactive]="trainer.status === 'Inactive'">{{ trainer.status }}</span></td>
             <td class="actions">
               <button type="button" (click)="view(trainer)">View</button>
               <button type="button" (click)="edit(trainer)">Edit</button>
               <button type="button" (click)="openAssignments(trainer)">Members</button>
+              <button type="button" (click)="openPTPackages(trainer)">PT Packages</button>
               <button type="button" *ngIf="trainer.status === 'Active'" class="danger" (click)="setStatus(trainer, 'Inactive')">Deactivate</button>
               <button type="button" *ngIf="trainer.status === 'Inactive'" (click)="setStatus(trainer, 'Active')">Activate</button>
             </td>
@@ -226,18 +285,140 @@
             <option *ngFor="let member of availableMembers" [value]="member._id">{{ member.fullName }} · {{ member.phone }}</option>
           </select>
         </label>
+        <label>Assignment role
+          <select name="assignmentRole" [(ngModel)]="assignmentRole">
+            <option value="Primary">Primary trainer</option>
+            <option value="Additional">Additional trainer</option>
+          </select>
+        </label>
+        <label>Training type
+          <select name="assignmentTrainingType" [(ngModel)]="assignmentTrainingType">
+            <option value="General">General</option>
+            <option value="Personal Training">Personal Training</option>
+          </select>
+        </label>
         <button class="primary-btn" [disabled]="assigning || !selectedMemberId">{{ assigning ? 'Assigning…' : 'Assign Member' }}</button>
       </form>
       <p *ngIf="assignmentLoading">Loading assigned members…</p>
       <div class="table-scroll" *ngIf="!assignmentLoading">
-        <table><thead><tr><th>Member</th><th>Phone</th><th>Status</th><th>Action</th></tr></thead>
+        <table><thead><tr><th>Member</th><th>Phone</th><th>Assignment</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
-            <tr *ngFor="let member of assignedMembers"><td>{{ member.fullName }}</td><td>{{ member.phone }}</td><td>{{ member.status }}</td>
+            <tr *ngFor="let member of assignedMembers"><td>{{ member.fullName }}</td><td>{{ member.phone }}</td><td>{{ member.assignmentRole || 'Primary' }}</td><td>{{ member.status }}</td>
               <td><button class="danger-link" type="button" (click)="removeAssignment(member)">Remove</button></td></tr>
-            <tr *ngIf="!assignedMembers.length"><td colspan="4" class="empty">No members are assigned to this trainer.</td></tr>
+            <tr *ngIf="!assignedMembers.length"><td colspan="5" class="empty">No members are assigned to this trainer.</td></tr>
           </tbody>
         </table>
       </div>
+    </section>
+  </div>
+
+  <div class="overlay" *ngIf="ptTrainer" (click)="closePTPackages()">
+    <section class="dialog-panel pt-dialog" role="dialog" aria-modal="true"
+      [attr.aria-label]="'Personal training packages for ' + ptTrainer.name" (click)="$event.stopPropagation()">
+      <div class="section-heading">
+        <div><span class="eyebrow">PERSONAL TRAINING LEDGER</span><h3>{{ ptTrainer.name }}</h3></div>
+        <button class="secondary-btn" type="button" (click)="closePTPackages()">Close</button>
+      </div>
+      <p class="muted">PT packages and payments are separate from gym membership fees and payment history.</p>
+      <p class="success-message" *ngIf="ptSuccess" role="status">{{ ptSuccess }}</p>
+      <p class="error-message" *ngIf="ptError" role="alert">{{ ptError }}</p>
+
+      <form class="form-panel" *ngIf="ptTrainer.status === 'Active'" (ngSubmit)="createPTPackage()">
+        <h4>Create PT package</h4>
+        <div class="form-grid">
+          <label>Assigned member *
+            <select name="ptMember" [(ngModel)]="ptPackageForm.memberId" required>
+              <option value="">Select a member assigned to this trainer</option>
+              <option *ngFor="let member of availableMembers" [value]="member._id">{{ member.fullName }} · {{ member.phone }}</option>
+            </select>
+          </label>
+          <label>Package name *<input name="ptPackageName" [(ngModel)]="ptPackageForm.packageName" maxlength="120" required></label>
+          <label>Package type
+            <select name="ptPackageType" [(ngModel)]="ptPackageForm.packageType">
+              <option>Monthly</option><option>Quarterly</option><option>Half-Yearly</option>
+              <option>Yearly</option><option>One-Time Package</option><option>Custom Duration</option>
+            </select>
+          </label>
+          <label>Start date *<input name="ptStartDate" type="date" [(ngModel)]="ptPackageForm.startDate" required></label>
+          <label>End date *<input name="ptEndDate" type="date" [(ngModel)]="ptPackageForm.endDate" required></label>
+          <label>Total PT fee *<input name="ptFee" type="number" min="0.01" step="0.01" [(ngModel)]="ptPackageForm.totalFee" required></label>
+          <label>Payment frequency
+            <select name="ptPaymentFrequency" [(ngModel)]="ptPackageForm.paymentFrequency">
+              <option>One-Time</option><option>Monthly</option><option>Quarterly</option><option>Custom</option>
+            </select>
+          </label>
+        </div>
+        <button class="primary-btn" [disabled]="ptSaving">{{ ptSaving ? 'Saving…' : 'Create PT package' }}</button>
+      </form>
+
+      <p *ngIf="ptPackagesLoading" class="loading-message">Loading PT packages…</p>
+      <section class="pt-package-card" *ngFor="let ptPackage of ptPackages">
+        <div class="pt-package-heading">
+          <div>
+            <h4>{{ ptPackage.packageName }}</h4>
+            <p>{{ ptMemberName(ptPackage) }} · {{ ptPackage.packageType }} · {{ ptPackage.startDate | date:'mediumDate' }} – {{ ptPackage.endDate | date:'mediumDate' }}</p>
+          </div>
+          <span class="status" [ngClass]="ptPackagePaymentStatusClass(ptPackage.paymentStatus)">
+            {{ ptPackagePaymentStatus(ptPackage.paymentStatus) }}
+          </span>
+        </div>
+        <div class="pt-balance-grid">
+          <span>Expected <strong>{{ formatCurrency(ptPackage.totalFee) }}</strong></span>
+          <span>Collected <strong>{{ formatCurrency(ptPackage.collectedAmount) }}</strong></span>
+          <span>Pending <strong>{{ formatCurrency(ptPackage.pendingAmount) }}</strong></span>
+        </div>
+        <button type="button" class="secondary-btn" *ngIf="ptPackage.pendingAmount > 0 && ptPackage.status !== 'Cancelled'"
+          (click)="startPTPayment(ptPackage)">Record PT payment</button>
+        <form class="form-panel pt-payment-form" *ngIf="ptPaymentPackageId === ptPackage._id" (ngSubmit)="recordPTPayment()">
+          <h5>Record successful PT payment</h5>
+          <p>Only record funds actually received. Failed attempts must not be entered as collections.</p>
+          <div class="form-grid">
+            <label>Amount *<input name="ptPaymentAmount" type="number" min="0.01" step="0.01" [max]="ptPackage.pendingAmount" [(ngModel)]="ptPaymentForm.amount" required></label>
+            <label>Payment method
+              <select name="ptPaymentMethod" [(ngModel)]="ptPaymentForm.paymentMethod">
+                <option>Cash</option><option>UPI</option><option>Card</option><option>Bank Transfer</option><option>Other</option>
+              </select>
+            </label>
+            <label>Payment date *<input name="ptPaymentDate" type="date" [(ngModel)]="ptPaymentForm.paymentDate" required></label>
+            <label>Transaction reference<input name="ptPaymentReference" [(ngModel)]="ptPaymentForm.transactionReference" maxlength="120"></label>
+          </div>
+          <div class="form-actions">
+            <button class="primary-btn" [disabled]="ptSaving">{{ ptSaving ? 'Recording…' : 'Confirm payment received' }}</button>
+            <button class="secondary-btn" type="button" (click)="ptPaymentPackageId = ''">Cancel</button>
+          </div>
+        </form>
+        <div class="pt-payment-history" *ngIf="ptPackage.payments.length">
+          <h5>PT payment history</h5>
+          <div class="pt-payment-row" *ngFor="let payment of ptPackage.payments">
+            <span>{{ payment.paymentDate | date:'mediumDate' }} · {{ payment.paymentMethod }}</span>
+            <strong>{{ formatCurrency(payment.netCollectedAmount) }} net of {{ formatCurrency(payment.refundedAmount) }} refunded</strong>
+            <span class="status" [ngClass]="ptTransactionStatusClass(payment)">{{ ptTransactionStatus(payment) }}</span>
+            <span>{{ payment.transactionReference || 'No reference' }}</span>
+            <button type="button" class="secondary-btn" (click)="togglePTPaymentDetails(payment)">
+              {{ ptDetailsPaymentId === payment._id ? 'Hide details' : 'Transaction details' }}
+            </button>
+            <div class="pt-payment-details" *ngIf="ptDetailsPaymentId === payment._id">
+              <p>Transaction amount: {{ formatCurrency(payment.amount) }} · {{ payment.status }}</p>
+              <button type="button" class="danger-link" *ngIf="payment.netCollectedAmount > 0"
+                (click)="startPTRefund(payment)">Record completed refund</button>
+              <form class="form-panel pt-refund-form" *ngIf="ptRefundPaymentId === payment._id" (ngSubmit)="recordPTRefund()">
+                <h5>Record completed refund</h5>
+                <div class="form-grid">
+                  <label>Refund amount *<input name="ptRefundAmount" type="number" min="0.01" step="0.01" [max]="payment.netCollectedAmount" [(ngModel)]="ptRefundForm.amount" required></label>
+                  <label>Refund reference *<input name="ptRefundReference" [(ngModel)]="ptRefundForm.refundReference" maxlength="120" required></label>
+                  <label>Reason *<input name="ptRefundReason" [(ngModel)]="ptRefundForm.reason" maxlength="500" required></label>
+                </div>
+                <div class="form-actions">
+                  <button class="danger-link" [disabled]="ptSaving">Confirm refund record</button>
+                  <button class="secondary-btn" type="button" (click)="ptRefundPaymentId = ''">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <p class="empty" *ngIf="!ptPackage.payments.length">No PT payments recorded.</p>
+      </section>
+      <p class="empty" *ngIf="!ptPackagesLoading && !ptPackages.length">No PT packages have been created for this trainer.</p>
     </section>
   </div>
 

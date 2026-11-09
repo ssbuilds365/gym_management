@@ -30,8 +30,16 @@ test('expense status is derived from recorded paid amount', () => {
 test('expense serialization exposes receipt metadata but not private Cloudinary identifiers', () => {
   const result = serializeExpense({
     amountMinor: 1250,
-    paidAmountMinor: 0,
-    payments: [],
+    paidAmountMinor: 400,
+    status: 'PARTIALLY_PAID',
+    payments: [{
+      amountMinor: 400,
+      paymentMethod: 'UPI',
+      paidAt: new Date('2026-11-06T00:00:00Z'),
+      reference: 'ref-1',
+      notes: 'First instalment',
+      recordedBy: { _id: 'owner-1', name: 'Owner' }
+    }],
     receipt: {
       publicId: 'private/tenant/asset',
       resourceType: 'raw',
@@ -43,6 +51,10 @@ test('expense serialization exposes receipt metadata but not private Cloudinary 
   assert.equal(result.receipt.originalName, 'invoice.pdf');
   assert.equal(result.receipt.publicId, undefined);
   assert.equal(result.receipt.url, undefined);
+  assert.equal(result.status, 'PARTIAL');
+  assert.equal(result.outstandingAmount, 8.5);
+  assert.equal(result.payments[0].recordedBy.name, 'Owner');
+  assert.equal(result.payments[0].notes, 'First instalment');
 });
 
 test('expense date parsing uses the business local calendar date', () => {
@@ -126,6 +138,12 @@ test('expense filters always scope to authenticated tenant and business', () => 
   assert.equal(filter.expenseDate.$gte.toISOString(), '2026-11-01T00:00:00.000Z');
   assert.equal(filter.expenseDate.$lt.toISOString(), '2026-12-01T00:00:00.000Z');
   assert.ok(filter.$or.length > 0);
+  assert.deepEqual(buildExpenseFilter({
+    tenantId,
+    businessId,
+    query: { status: 'PARTIAL' },
+    range: null
+  }).status, { $in: ['PARTIAL', 'PARTIALLY_PAID'] });
 });
 
 test('CSV export escapes cells and neutralizes spreadsheet formulas', () => {
