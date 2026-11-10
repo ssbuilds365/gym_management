@@ -37,9 +37,10 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   members: any[] = [];
   attendanceList: any[] = [];
   checkedInCount = 0;
+  businessTimeZone = 'Asia/Kolkata';
 
   selectedMemberId = '';
-  selectedDate = this.getTodayDate();
+  selectedDate = '';
 
   loadingMembers = false;
   loadingAttendance = false;
@@ -69,6 +70,8 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   ) {}
 
   ngOnInit(): void {
+    this.businessTimeZone = this.getStoredBusinessTimeZone();
+    this.selectedDate = this.getTodayDate();
     this.loadMembers();
     this.loadDailyAttendance();
   }
@@ -95,12 +98,31 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   // Get today's local date
   getTodayDate(): string {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: this.businessTimeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(
+      parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value])
+    );
+    return `${values['year']}-${values['month']}-${values['day']}`;
+  }
 
-    return `${year}-${month}-${day}`;
+  private getStoredBusinessTimeZone(): string {
+    const businessJson = localStorage.getItem('business');
+    if (!businessJson) return this.businessTimeZone;
+
+    try {
+      const timeZone = JSON.parse(businessJson).timeZone;
+      return typeof timeZone === 'string' && timeZone
+        ? timeZone
+        : this.businessTimeZone;
+    } catch (error) {
+      console.error('Unable to read business timezone for attendance:', error);
+      return this.businessTimeZone;
+    }
   }
 
   // Load Members
@@ -380,7 +402,8 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   private formatTime(value: string | Date): string {
     return new Date(value).toLocaleTimeString('en-IN', {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: this.businessTimeZone
     });
   }
 

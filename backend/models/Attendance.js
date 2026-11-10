@@ -35,6 +35,12 @@ const attendanceSchema = new mongoose.Schema(
       default: null
     },
 
+    checkoutType: {
+      type: String,
+      enum: ['MANUAL', 'AUTOMATIC'],
+      default: null
+    },
+
     durationMinutes: {
       type: Number,
       min: 0,
@@ -69,6 +75,7 @@ const attendanceSchema = new mongoose.Schema(
 
 // Daily attendance lookup
 attendanceSchema.index({ tenantId: 1, attendanceDate: 1, checkIn: -1 });
+attendanceSchema.index({ tenantId: 1, businessId: 1, checkOut: 1, checkIn: 1 });
 
 // Member attendance history
 attendanceSchema.index({

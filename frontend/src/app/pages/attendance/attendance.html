@@ -250,15 +250,21 @@
             </td>
 
             <td>
-              {{ record.checkIn | date:'shortTime' }}
+              {{ record.checkIn | date:'shortTime':businessTimeZone }}
             </td>
 
             <td>
               {{
                 record.checkOut
-                  ? (record.checkOut | date:'shortTime')
+                  ? (record.checkOut | date:'shortTime':businessTimeZone)
                   : 'Not Checked Out'
               }}
+              <span
+                class="auto-checkout-label"
+                *ngIf="record.checkoutType === 'AUTOMATIC'"
+              >
+                Auto Checkout
+              </span>
             </td>
 
             <td>

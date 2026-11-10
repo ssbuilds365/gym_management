@@ -275,12 +275,21 @@ table {
 }
 
 .type-badge,
-.status-badge {
+.status-badge,
+.auto-checkout-label {
   display: inline-block;
   padding: 5px 10px;
   border-radius: 20px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.auto-checkout-label {
+  margin-left: 6px;
+  background: #f0f0f0;
+  color: #666;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .type-badge {

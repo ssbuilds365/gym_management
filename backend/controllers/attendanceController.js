@@ -1,21 +1,23 @@
 const Attendance = require('../models/Attendance');
 const Member = require('../models/Member');
+const Business = require('../models/Business');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const {
+  DEFAULT_TIME_ZONE,
+  isValidTimeZone
+} = require('../utils/membershipExpiry');
+const {
+  getAttendanceDayBounds,
+  getAttendanceDateBounds
+} = require('../utils/attendanceDates');
+const { reconcileOpenAttendance } = require('../services/attendanceAutoCheckout');
 
-// Get start of day in UTC
-const getDayStart = (dateValue) => {
-  const date = dateValue ? new Date(dateValue) : new Date();
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate()
-  ));
+const getTenantTimeZone = async tenantId => {
+  const business = await Business.findById(tenantId).select('timeZone').lean();
+  return business && isValidTimeZone(business.timeZone)
+    ? business.timeZone
+    : DEFAULT_TIME_ZONE;
 };
 
 // Member Check-in
@@ -51,6 +53,10 @@ const checkIn = async (req, res) => {
       });
     }
 
+    await reconcileOpenAttendance({ tenantId: req.tenantId });
+    const timeZone = await getTenantTimeZone(req.tenantId);
+    const checkInAt = new Date();
+    const dayStart = getAttendanceDayBounds(checkInAt, timeZone).start;
     const existingAttendance = await Attendance.findOne({
       tenantId: req.tenantId,
       memberId,
@@ -75,8 +81,6 @@ const checkIn = async (req, res) => {
       });
     }
 
-    const checkInAt = new Date();
-    const dayStart = getDayStart(checkInAt);
     const recentAttendance = await Attendance.findOne({
       tenantId: req.tenantId,
       memberId,
@@ -138,6 +142,7 @@ const checkOut = async (req, res) => {
       });
     }
 
+    await reconcileOpenAttendance({ tenantId: req.tenantId });
     const attendance = await Attendance.findOne({
       tenantId: req.tenantId,
       memberId,
@@ -151,12 +156,33 @@ const checkOut = async (req, res) => {
       });
     }
 
-    attendance.checkOut = new Date();
-    attendance.durationMinutes = Math.max(
+    const checkOutAt = new Date(Math.max(Date.now(), attendance.checkIn.getTime()));
+    const durationMinutes = Math.max(
       0,
-      Math.floor((attendance.checkOut.getTime() - attendance.checkIn.getTime()) / 60000)
+      Math.floor((checkOutAt.getTime() - attendance.checkIn.getTime()) / 60000)
     );
-    await attendance.save();
+    const updateResult = await Attendance.updateOne({
+      _id: attendance._id,
+      tenantId: req.tenantId,
+      checkOut: null
+    }, {
+      $set: {
+        checkOut: checkOutAt,
+        checkoutType: 'MANUAL',
+        durationMinutes
+      }
+    });
+
+    if (updateResult.modifiedCount !== 1) {
+      return res.status(409).json({
+        success: false,
+        message: 'Attendance was already checked out'
+      });
+    }
+
+    attendance.checkOut = checkOutAt;
+    attendance.checkoutType = 'MANUAL';
+    attendance.durationMinutes = durationMinutes;
 
     return res.status(200).json({
       success: true,
@@ -178,24 +204,22 @@ const checkOut = async (req, res) => {
 // Get Daily Attendance
 const getDailyAttendance = async (req, res) => {
   try {
-    const dayStart = getDayStart(req.query.date);
-
-    if (!dayStart) {
+    const timeZone = await getTenantTimeZone(req.tenantId);
+    const bounds = getAttendanceDateBounds(req.query.date, timeZone);
+    if (!bounds) {
       return res.status(400).json({
         success: false,
         message: 'Invalid attendance date'
       });
     }
 
-    const dayEnd = new Date(dayStart);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-
     const attendance = await Attendance.find({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
       $or: [
-        { attendanceDate: { $gte: dayStart, $lt: dayEnd } },
-        { checkOut: null, checkIn: { $lt: dayEnd } }
+        { attendanceDate: { $gte: bounds.start, $lt: bounds.nextStart } },
+        { attendanceDate: { $gte: bounds.legacyStart, $lt: bounds.legacyNextStart } },
+        { checkOut: null, checkIn: { $lt: bounds.nextStart } }
       ]
     })
       .populate('memberId', 'fullName phone')
@@ -290,6 +314,7 @@ exports.checkInWithQR = async (req, res) => {
       });
     }
 
+    await reconcileOpenAttendance({ tenantId: req.tenantId });
     const existingAttendance = await Attendance.findOne({
       tenantId: req.tenantId,
       memberId: member._id,
@@ -303,8 +328,9 @@ exports.checkInWithQR = async (req, res) => {
       });
     }
 
+    const timeZone = await getTenantTimeZone(req.tenantId);
     const checkInAt = new Date();
-    const dayStart = getDayStart(checkInAt);
+    const dayStart = getAttendanceDayBounds(checkInAt, timeZone).start;
     const recentAttendance = await Attendance.findOne({
       tenantId: req.tenantId,
       memberId: member._id,

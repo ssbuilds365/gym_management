@@ -5,6 +5,7 @@ const helmet = require('helmet');
 
 const config = require('./config/env');
 const connectDB = require('./config/db');
+const { startAttendanceAutoCheckout } = require('./services/attendanceAutoCheckout');
 
 const dns = require('node:dns');
 
@@ -85,6 +86,7 @@ app.get('/api/health', (req, res) => {
 const startServer = async () => {
   try {
     await connectDB();
+    await startAttendanceAutoCheckout();
 
     app.listen(config.port, () => {
       console.log(`Server running on port ${config.port}`);
