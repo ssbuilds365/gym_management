@@ -261,12 +261,12 @@
 
                 <div class="form-group">
                     <label>Full Name *</label>
-                    <input name="fullName" [(ngModel)]="memberForm.fullName" required placeholder="Enter full name" />
+                    <input name="fullName" [(ngModel)]="memberForm.fullName" [readonly]="activeRegistrationRequest" required placeholder="Enter full name" />
                 </div>
 
                 <div class="form-group">
                     <label>Phone Number *</label>
-                    <input name="phone" [(ngModel)]="memberForm.phone" required maxlength="15"
+                    <input name="phone" [(ngModel)]="memberForm.phone" [readonly]="activeRegistrationRequest" required maxlength="15"
                         placeholder="Enter phone number" />
                 </div>
 
@@ -287,6 +287,12 @@
                 <div class="form-group">
                     <label>Date of Birth</label>
                     <input type="date" name="dateOfBirth" [(ngModel)]="memberForm.dateOfBirth" />
+                </div>
+
+                <div class="form-group" *ngIf="registrationRequest || activeRegistrationRequest">
+                    <label>Age (optional)</label>
+                    <input type="number" name="enquiryAge" [(ngModel)]="memberForm.age" min="1" max="120" placeholder="Age provided with enquiry" />
+                    <small>This age is not converted into a date of birth.</small>
                 </div>
 
                 <div class="form-group">
@@ -382,7 +388,7 @@
                 <button type="button" class="cancel-btn" (click)="closeForm()">Cancel</button>
 
                 <button type="submit" class="save-btn" [disabled]="memberFormRef.invalid || saving">
-                    {{ saving ? 'Saving...' : isEditMode ? 'Update Member' : 'Save Member' }}
+                    {{ saving ? 'Saving...' : isEditMode ? 'Update Member' : activeRegistrationRequest && registrationMemberId && memberForm.planId ? 'Assign Membership' : activeRegistrationRequest && !registrationMemberId ? 'Convert to Member' : 'Save Member' }}
                 </button>
 
 

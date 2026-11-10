@@ -1,0 +1,279 @@
+<section class="enquiries-page">
+  <header class="page-header">
+    <div>
+      <span class="eyebrow">MANAGEMENT</span>
+      <h1>Enquiry <span>Management</span></h1>
+      <p>Track prospective members, follow-ups, and trial sessions.</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" class="secondary-btn" [class.active]="mode === 'analytics'" (click)="openAnalytics()">Analytics</button>
+      <button type="button" class="primary-btn" (click)="openCreateForm()">＋ New enquiry</button>
+    </div>
+  </header>
+
+  <div class="notice success" *ngIf="successMessage" role="status">
+    {{ successMessage }} <button type="button" aria-label="Dismiss message" (click)="successMessage = ''">×</button>
+  </div>
+  <div class="notice error" *ngIf="errorMessage" role="alert">
+    {{ errorMessage }} <button type="button" aria-label="Dismiss error" (click)="errorMessage = ''">×</button>
+  </div>
+
+  <ng-container *ngIf="mode === 'list'; else analyticsView">
+    <section class="metrics" aria-label="Enquiry summary">
+      <article class="metric-card"><span class="metric-icon">◎</span><div><small>Total enquiries</small><strong>{{ dashboardLoading ? '…' : metric('total') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon amber">＋</span><div><small>New</small><strong>{{ dashboardLoading ? '…' : metric('NEW') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon blue">☆</span><div><small>Interested</small><strong>{{ dashboardLoading ? '…' : metric('INTERESTED') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon amber">◇</span><div><small>Trial scheduled</small><strong>{{ dashboardLoading ? '…' : metric('TRIAL_SCHEDULED') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon amber">↻</span><div><small>Follow-ups today</small><strong>{{ dashboardLoading ? '…' : metric('followUpsToday') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon amber">!</span><div><small>Overdue follow-ups</small><strong>{{ dashboardLoading ? '…' : metric('overdueFollowUps') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon green">✓</span><div><small>Converted</small><strong>{{ dashboardLoading ? '…' : metric('CONVERTED') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon">×</span><div><small>Lost</small><strong>{{ dashboardLoading ? '…' : metric('LOST') }}</strong></div></article>
+      <article class="metric-card"><span class="metric-icon green">%</span><div><small>Conversion rate</small><strong>{{ dashboardLoading ? '…' : metric('conversionRate') }}</strong></div></article>
+      <p class="inline-error" *ngIf="dashboardError" role="status">{{ dashboardError }}</p>
+    </section>
+
+    <section class="filter-panel" aria-label="Filter enquiries">
+      <label class="search-field"><span aria-hidden="true">⌕</span>
+        <input type="search" [(ngModel)]="search" (keyup.enter)="applyFilters()" placeholder="Search name or mobile" aria-label="Search enquiries">
+      </label>
+      <select [(ngModel)]="statusFilter" (change)="applyFilters()" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option *ngFor="let status of statuses" [value]="status">{{ status }}</option>
+      </select>
+      <select [(ngModel)]="sourceFilter" (change)="applyFilters()" aria-label="Filter by source">
+        <option value="">All sources</option>
+        <option *ngFor="let source of sources" [value]="source">{{ source }}</option>
+      </select>
+      <select [(ngModel)]="assignedStaffFilter" (change)="applyFilters()" aria-label="Filter by assigned staff">
+        <option value="">All assigned staff</option>
+        <option *ngFor="let person of staff" [value]="person._id">{{ person.fullName || person.name }}</option>
+      </select>
+      <label class="date-filter">From <input type="date" [(ngModel)]="fromDate" (change)="applyFilters()" aria-label="Created from date"></label>
+      <label class="date-filter">To <input type="date" [(ngModel)]="toDate" (change)="applyFilters()" aria-label="Created to date"></label>
+      <button type="button" class="secondary-btn" (click)="applyFilters()">Search</button>
+      <label class="page-size">Rows
+        <select [(ngModel)]="limit" (change)="page = 1; loadList()" aria-label="Rows per page">
+          <option *ngFor="let size of pageSizes" [ngValue]="size">{{ size }}</option>
+        </select>
+      </label>
+    </section>
+
+    <div class="list-layout">
+      <section class="list-card">
+        <div class="list-heading">
+          <div><h2>Prospective members</h2><p>{{ total }} record{{ total === 1 ? '' : 's' }}</p></div>
+          <span class="page-indicator" *ngIf="totalPages">Page {{ page }} of {{ totalPages }}</span>
+        </div>
+        <div class="loading-state" *ngIf="loading" role="status" aria-live="polite">
+          <span class="spinner"></span> Loading enquiries…
+        </div>
+        <div class="empty-state" *ngIf="!loading && !errorMessage && enquiries.length === 0">
+          <span class="empty-icon">◎</span><h3>No enquiries yet</h3>
+          <p>New prospective members will appear here.</p>
+          <button type="button" class="primary-btn" (click)="openCreateForm()">Add an enquiry</button>
+        </div>
+        <div class="table-wrap" *ngIf="!loading && enquiries.length">
+          <table>
+            <thead><tr><th>Prospect</th><th>Interested in</th><th>Source</th><th>Plan / staff</th><th>Expected joining</th><th>Status</th><th>Follow-up</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let enquiry of enquiries" [class.selected]="selectedEnquiry?._id === enquiry._id">
+                <td>
+                  <button type="button" class="prospect-link" (click)="selectEnquiry(enquiry)">{{ enquiry.fullName }}</button>
+                  <a *ngIf="phoneUrl(enquiry.phone)" class="sub-link" [href]="phoneUrl(enquiry.phone)">{{ enquiry.phone }}</a>
+                  <span class="sub-link" *ngIf="!phoneUrl(enquiry.phone)">{{ enquiry.phone }}</span>
+                  <small *ngIf="enquiry.email">{{ enquiry.email }}</small>
+                </td>
+                <td>{{ enquiry.interestedIn || '—' }}<small *ngIf="enquiry.age">Age {{ enquiry.age }}</small></td>
+                <td>{{ enquiry.source || '—' }}</td>
+                <td>{{ referenceName(enquiry.planId) || '—' }}<small>{{ referenceName(enquiry.assignedStaffId) || 'Unassigned' }}</small></td>
+                <td>{{ enquiry.expectedJoiningDate ? (enquiry.expectedJoiningDate | date:'mediumDate') : '—' }}</td>
+                <td>
+                  <select class="status-select" [ngModel]="enquiry.status || 'NEW'" (ngModelChange)="updateStatus(enquiry, $event)" [disabled]="enquiry.status === 'CONVERTED'" [attr.aria-label]="'Change status for ' + enquiry.fullName">
+                    <option *ngFor="let status of statuses" [value]="status">{{ statusLabels[status] }}</option>
+                  </select>
+                </td>
+                <td>{{ enquiry.nextFollowUpAt ? (enquiry.nextFollowUpAt | date:'mediumDate') : '—' }}</td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" title="View details" aria-label="View details" (click)="selectEnquiry(enquiry)">↗</button>
+                    <button type="button" title="Edit enquiry" aria-label="Edit enquiry" [disabled]="enquiry.status === 'CONVERTED'" (click)="openEditForm(enquiry)">✎</button>
+                    <button type="button" title="Record follow-up" aria-label="Record follow-up" (click)="selectEnquiry(enquiry); openFollowUpForm()">↻</button>
+                    <button type="button" title="Schedule trial" aria-label="Schedule trial" (click)="selectEnquiry(enquiry); openTrialForm()">◇</button>
+                    <button type="button" title="Convert to Member" aria-label="Convert to Member" [disabled]="enquiry.status === 'CONVERTED' || conversionLoading" (click)="startConversion(enquiry)">M</button>
+                    <a *ngIf="whatsappUrl(enquiry)" class="whatsapp-action" [href]="whatsappUrl(enquiry)" target="_blank" rel="noopener noreferrer" aria-label="Message on WhatsApp">W</a>
+                    <button type="button" class="delete-action" title="Delete enquiry" aria-label="Delete enquiry" [disabled]="deletingId === enquiry._id" (click)="deleteEnquiry(enquiry)">⌫</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <nav class="pagination" *ngIf="!loading && totalPages > 1" aria-label="Enquiry pages">
+          <button type="button" (click)="changePage(page - 1)" [disabled]="page <= 1">← Previous</button>
+          <span>{{ page }} / {{ totalPages }}</span>
+          <button type="button" (click)="changePage(page + 1)" [disabled]="page >= totalPages">Next →</button>
+        </nav>
+      </section>
+
+      <aside class="details-card" *ngIf="selectedEnquiry as selected">
+        <div class="detail-heading">
+          <div><span class="eyebrow">ENQUIRY DETAILS</span><h2>{{ selected.fullName }}</h2></div>
+          <button type="button" class="icon-button" aria-label="Close details" (click)="selectedEnquiry = null">×</button>
+        </div>
+        <p class="detail-contact">{{ selected.phone }}<span *ngIf="selected.email"> · {{ selected.email }}</span></p>
+        <div class="detail-actions">
+          <a *ngIf="phoneUrl(selected.phone)" [href]="phoneUrl(selected.phone)">Call</a>
+          <a *ngIf="whatsappUrl(selected)" [href]="whatsappUrl(selected)" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+          <button type="button" (click)="openEditForm(selected)">Edit</button>
+        </div>
+        <dl class="detail-grid">
+          <div><dt>Status</dt><dd>{{ statusLabel(selected.status) }}</dd></div>
+          <div><dt>Source</dt><dd>{{ selected.source || '—' }}</dd></div>
+          <div><dt>Interested in</dt><dd>{{ selected.interestedIn || '—' }}</dd></div>
+          <div><dt>Age</dt><dd>{{ selected.age ?? '—' }}</dd></div>
+          <div><dt>Preferred plan</dt><dd>{{ referenceName(selected.planId) || '—' }}</dd></div>
+          <div><dt>Assigned staff</dt><dd>{{ referenceName(selected.assignedStaffId) || 'Unassigned' }}</dd></div>
+          <div><dt>Expected joining</dt><dd>{{ selected.expectedJoiningDate ? (selected.expectedJoiningDate | date:'mediumDate') : '—' }}</dd></div>
+          <div><dt>Next follow-up</dt><dd>{{ selected.nextFollowUpAt ? (selected.nextFollowUpAt | date:'medium') : 'Not scheduled' }}</dd></div>
+        </dl>
+        <div class="detail-notes" *ngIf="selected.notes"><h3>Notes</h3><p>{{ selected.notes }}</p></div>
+        <div class="detail-actions workflow-actions">
+          <button type="button" (click)="openFollowUpForm()">＋ Follow-up</button>
+          <button type="button" (click)="openTrialForm()">＋ Schedule trial</button>
+          <button type="button" class="convert-button" [disabled]="conversionLoading || selected.status === 'CONVERTED'" (click)="startConversion(selected)">
+            {{ conversionLoading ? 'Converting…' : selected.status === 'CONVERTED' ? 'Converted' : 'Convert to Member' }}
+          </button>
+        </div>
+        <section class="history-section" *ngIf="selected.statusHistory?.length">
+          <h3>Status history</h3>
+          <article *ngFor="let entry of selected.statusHistory" class="history-item">
+            <strong>{{ entry.previousStatus ? statusLabel(entry.previousStatus) + ' → ' : '' }}{{ statusLabel(entry.newStatus || entry.status) }}</strong><time>{{ entry.changedAt | date:'medium' }}</time>
+            <p *ngIf="entry.note">{{ entry.note }}</p>
+          </article>
+        </section>
+        <section class="history-section" *ngIf="selected.status === 'CONVERTED'">
+          <h3>Conversion</h3>
+          <p *ngIf="selected.convertedAt">Converted {{ selected.convertedAt | date:'medium' }}</p>
+          <p *ngIf="selected.convertedMemberId">Member ID: {{ referenceId(selected.convertedMemberId) }}</p>
+        </section>
+        <section class="history-section" *ngIf="selected.followUps?.length">
+          <h3>Follow-up history</h3>
+          <article *ngFor="let followUp of selected.followUps" class="history-item">
+            <strong>{{ followUp.outcome || 'Follow-up' }}</strong><time>{{ (followUp.followUpAt || followUp.createdAt) | date:'medium' }}</time>
+            <p *ngIf="followUp.notes">{{ followUp.notes }}</p>
+            <small *ngIf="followUp.assignedStaffId">Assigned: {{ referenceName(followUp.assignedStaffId) }}</small>
+            <small *ngIf="followUp.nextFollowUpAt">Next: {{ followUp.nextFollowUpAt | date:'medium' }}</small>
+          </article>
+        </section>
+        <section class="history-section" *ngIf="selected.trials?.length">
+          <h3>Trial sessions</h3>
+          <article *ngFor="let trial of selected.trials" class="history-item">
+            <strong>{{ trialStatusLabels[trial.status] || trial.status }} · {{ trial.startDate | date:'medium' }}</strong>
+            <p *ngIf="trial.endDate">Ends {{ trial.endDate | date:'medium' }}</p>
+            <p *ngIf="trial.assignedTrainerId">Trainer: {{ referenceName(trial.assignedTrainerId) }}</p>
+            <p *ngIf="trial.feedback">{{ trial.feedback }}</p>
+            <p *ngIf="trial.notes">{{ trial.notes }}</p>
+            <small *ngIf="trial.nextFollowUpAt">Next follow-up: {{ trial.nextFollowUpAt | date:'medium' }}</small>
+          </article>
+        </section>
+      </aside>
+    </div>
+  </ng-container>
+
+  <ng-template #analyticsView>
+    <section class="analytics-view">
+      <div class="list-heading">
+        <div><h2>Enquiry analytics</h2><p>Performance summaries from your enquiry records.</p></div>
+        <button type="button" class="secondary-btn" (click)="openList()">← Back to enquiries</button>
+      </div>
+      <div class="loading-state" *ngIf="analyticsLoading"><span class="spinner"></span> Loading analytics…</div>
+      <div class="inline-error" *ngIf="analyticsError" role="alert">{{ analyticsError }}</div>
+      <div class="analytics-grid" *ngIf="analyticsData">
+        <section class="chart-card" *ngFor="let chart of [{key:'sources', title:'Enquiries by source'}, {key:'convertedBySource', title:'Converted by source'}, {key:'lostBySource', title:'Lost by source'}, {key:'monthly', title:'Monthly enquiries'}, {key:'staff', title:'Enquiries by staff'}, {key:'statuses', title:'Status breakdown'}]">
+          <h3>{{ chart.title }}</h3>
+          <div class="chart-empty" *ngIf="chartRows(chart.key).length === 0">No analytics available for this period.</div>
+          <div class="bar-row" *ngFor="let row of chartRows(chart.key)">
+            <span>{{ row.label }}</span><div class="bar-track"><i [style.width.%]="barWidth(chart.key, row.value)"></i></div><strong>{{ row.value }}</strong>
+          </div>
+        </section>
+      </div>
+      <div class="analytics-totals" *ngIf="analyticsData">
+        <span>Total enquiries <strong>{{ analyticsData.total ?? 0 }}</strong></span>
+        <span>Converted <strong>{{ analyticsData.converted ?? 0 }}</strong></span>
+        <span>Lost <strong>{{ analyticsData.lost ?? 0 }}</strong></span>
+        <span>Conversion rate <strong>{{ analyticsData.conversionRate ?? 0 }}%</strong></span>
+      </div>
+    </section>
+  </ng-template>
+
+  <div class="modal-backdrop" *ngIf="showForm" (click)="closeForm()">
+    <section class="form-modal" role="dialog" aria-modal="true" aria-labelledby="enquiry-form-title" (click)="$event.stopPropagation()">
+      <header><div><span class="eyebrow">PROSPECT DETAILS</span><h2 id="enquiry-form-title">{{ editingId ? 'Edit enquiry' : 'New enquiry' }}</h2></div><button type="button" class="icon-button" aria-label="Close form" (click)="closeForm()">×</button></header>
+      <div class="notice duplicate" *ngIf="duplicateMessage" role="alert">
+        {{ duplicateMessage }}
+        <button type="button" *ngIf="duplicateEnquiryId" (click)="viewDuplicateEnquiry()">View existing enquiry</button>
+      </div>
+      <p class="notice error" *ngIf="referencesError" role="alert">{{ referencesError }}</p>
+      <div class="form-grid">
+        <label>Full name <input [(ngModel)]="enquiryForm.fullName" name="fullName" required autocomplete="name"></label>
+        <label>Mobile number <input [(ngModel)]="enquiryForm.phone" name="phone" required type="tel" autocomplete="tel"></label>
+        <label>Email <input [(ngModel)]="enquiryForm.email" name="email" type="email" autocomplete="email"></label>
+        <label>Gender
+          <select [(ngModel)]="enquiryForm.gender" name="gender"><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select>
+        </label>
+        <label>Age (optional) <input [(ngModel)]="enquiryForm.age" name="age" type="number" min="1" max="120"></label>
+        <label>Source
+          <select [(ngModel)]="enquiryForm.source" name="source"><option value="">Select source</option><option *ngFor="let source of sources" [value]="source">{{ source }}</option></select>
+        </label>
+        <label>Interested in
+          <select [(ngModel)]="enquiryForm.interestedIn" name="interestedIn"><option value="">Select interest</option><option *ngFor="let interest of interests" [value]="interest">{{ interest }}</option></select>
+        </label>
+        <label>Preferred plan
+          <select [(ngModel)]="enquiryForm.planId" name="planId"><option value="">No preference</option><option *ngFor="let plan of plans" [value]="plan._id">{{ plan.planName }}</option></select>
+        </label>
+        <label>Assigned staff
+          <select [(ngModel)]="enquiryForm.assignedStaffId" name="assignedStaffId"><option value="">Unassigned</option><option *ngFor="let person of staff" [value]="person._id">{{ person.fullName || person.name }}</option></select>
+        </label>
+        <label>Expected joining date <input type="date" [(ngModel)]="enquiryForm.expectedJoiningDate" name="expectedJoiningDate"></label>
+        <label>Next follow-up <input type="datetime-local" [(ngModel)]="enquiryForm.nextFollowUpAt" name="nextFollowUpAt"></label>
+        <label class="full-width">Notes <textarea [(ngModel)]="enquiryForm.notes" name="notes" rows="3"></textarea></label>
+      </div>
+      <footer><button type="button" class="secondary-btn" (click)="closeForm()">Cancel</button><button type="button" class="primary-btn" [disabled]="saving" (click)="saveEnquiry()">{{ saving ? 'Saving…' : editingId ? 'Save changes' : 'Create enquiry' }}</button></footer>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" *ngIf="showFollowUpForm" (click)="showFollowUpForm = false">
+    <section class="form-modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="follow-up-title" (click)="$event.stopPropagation()">
+      <header><h2 id="follow-up-title">Record follow-up</h2><button type="button" class="icon-button" aria-label="Close form" (click)="showFollowUpForm = false">×</button></header>
+      <div class="form-grid">
+        <label>Follow-up date<input type="date" [(ngModel)]="followUpForm.date" name="followupDate" required></label>
+        <label>Follow-up time (optional)<input type="time" [(ngModel)]="followUpForm.time" name="followupTime"></label>
+        <label>Outcome<input [(ngModel)]="followUpForm.outcome" name="followupOutcome" placeholder="Reached, no answer, requested callback"></label>
+        <label>Next follow-up<input type="datetime-local" [(ngModel)]="followUpForm.nextFollowUpAt" name="nextFollowUpAt"></label>
+        <label>Assigned staff
+          <select [(ngModel)]="followUpForm.assignedStaffId" name="followupStaff"><option value="">Unassigned</option><option *ngFor="let person of staff" [value]="person._id">{{ person.name || person.fullName }}</option></select>
+        </label>
+        <label class="full-width">Notes<textarea [(ngModel)]="followUpForm.notes" name="followupNotes" rows="3"></textarea></label>
+      </div>
+      <footer><button type="button" class="secondary-btn" (click)="showFollowUpForm = false">Cancel</button><button type="button" class="primary-btn" [disabled]="saving" (click)="saveFollowUp()">{{ saving ? 'Saving…' : 'Save follow-up' }}</button></footer>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" *ngIf="showTrialForm" (click)="showTrialForm = false">
+    <section class="form-modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="trial-title" (click)="$event.stopPropagation()">
+      <header><h2 id="trial-title">Schedule a trial</h2><button type="button" class="icon-button" aria-label="Close form" (click)="showTrialForm = false">×</button></header>
+      <div class="form-grid">
+        <label>Start date and time<input type="datetime-local" [(ngModel)]="trialForm.startDate" name="trialStart" required></label>
+        <label>End date and time<input type="datetime-local" [(ngModel)]="trialForm.endDate" name="trialEnd"></label>
+        <label>Trial status<select [(ngModel)]="trialForm.status" name="trialStatus"><option *ngFor="let status of trialStatuses" [value]="status">{{ trialStatusLabels[status] }}</option></select></label>
+        <label>Assigned trainer
+          <select [(ngModel)]="trialForm.assignedTrainerId" name="trialTrainer"><option value="">Unassigned</option><option *ngFor="let person of staff" [ngValue]="person._id" [disabled]="person.role !== 'Trainer'">{{ person.name || person.fullName }}</option></select>
+        </label>
+        <label>Next follow-up<input type="datetime-local" [(ngModel)]="trialForm.nextFollowUpAt" name="trialNextFollowUp"></label>
+        <label class="full-width">Trial feedback<textarea [(ngModel)]="trialForm.feedback" name="trialFeedback" rows="3"></textarea></label>
+        <label class="full-width">Notes<textarea [(ngModel)]="trialForm.notes" name="trialNotes" rows="3"></textarea></label>
+      </div>
+      <footer><button type="button" class="secondary-btn" (click)="showTrialForm = false">Cancel</button><button type="button" class="primary-btn" [disabled]="saving || !trialForm.startDate" (click)="saveTrial()">{{ saving ? 'Saving…' : 'Schedule trial' }}</button></footer>
+    </section>
+  </div>
+</section>

@@ -93,6 +93,18 @@ describe('App', () => {
     expect(systemGroup?.items.map(item => item.name)).toEqual(['Settings', 'Database Storage']);
   });
 
+  it('places Enquiries directly below Expense Tracker in Management navigation', () => {
+    const fixture = TestBed.createComponent(App);
+    const managementGroup = fixture.componentInstance.menuGroups.find(group => group.title === 'MANAGEMENT');
+
+    expect(managementGroup?.items.map(item => item.name)).toEqual([
+      'Expense Tracker',
+      'Enquiry Management',
+      'Trainers & Staff',
+      'Reports & Analytics'
+    ]);
+  });
+
   it('does not render owner subscription status or view-subscription links', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();

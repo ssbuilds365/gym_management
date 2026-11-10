@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
+import { SimpleChange } from '@angular/core';
 
 import { Members } from './members';
 import { MemberService } from '../../services/member';
@@ -82,6 +83,43 @@ describe('Members', () => {
 
     expect(planService.getMemberMemberships).toHaveBeenCalledTimes(1);
     expect(component.membershipHistory).toEqual(records);
+  });
+
+  it('submits enquiry conversion through the backend flow without creating a duplicate member', () => {
+    const request = {
+      requestId: 'enquiry-1-attempt',
+      enquiryId: 'enquiry-1',
+      enquiry: {
+        fullName: 'Asha',
+        phone: '9876543210',
+        email: 'asha@example.com',
+        gender: 'Female',
+        age: 31
+      }
+    };
+    const submitted = vi.fn();
+    component.conversionSubmitted.subscribe(submitted);
+    component.registrationRequest = request;
+    component.ngOnChanges({
+      registrationRequest: new SimpleChange(null, request, true)
+    });
+
+    expect(component.memberForm.fullName).toBe('Asha');
+    expect(component.memberForm.phone).toBe('9876543210');
+    expect(component.memberForm.email).toBe('asha@example.com');
+    expect(component.memberForm.gender).toBe('Female');
+    expect(component.memberForm.age).toBe(31);
+    expect(component.memberForm.dateOfBirth).toBe('');
+
+    component.saveMember();
+
+    expect(memberService.addMember).not.toHaveBeenCalled();
+    expect(submitted).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: request.requestId,
+      enquiryId: request.enquiryId,
+      payload: expect.objectContaining({ dateOfBirth: null, email: 'asha@example.com' })
+    }));
+    expect(submitted.mock.calls[0][0].payload).not.toHaveProperty('age');
   });
 
   it('debounces member search input and sends the latest term', async () => {

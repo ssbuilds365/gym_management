@@ -16,6 +16,7 @@ import { Reports } from './pages/reports/reports';
 import { BusinessSettings } from './pages/settings/settings';
 import { ExpiringMember, MembershipExpiry } from './pages/membership-expiry/membership-expiry';
 import { ExpenseTracker } from './pages/expenses/expense-tracker';
+import { Enquiries } from './pages/enquiries/enquiries';
 import { DatabaseStorage } from './pages/database-storage/database-storage';
 import { SessionActivityService } from './services/session-activity';
 
@@ -36,6 +37,7 @@ import { environment } from '../environments/environment';
     BusinessSettings,
     MembershipExpiry,
     ExpenseTracker,
+    Enquiries,
     DatabaseStorage
   ],
   templateUrl: './app.html',
@@ -67,6 +69,9 @@ export class App implements OnInit, OnDestroy {
   birthdaysError = '';
   birthdayActionError = '';
   memberToFocus: ExpiringMember | null = null;
+  memberRegistrationRequest: any = null;
+  memberConversionSubmission: any = null;
+  memberConversionResult: any = null;
   readonly dashboardStatPlaceholders = [0, 1, 2, 3];
 
   dashboardLoading = false;
@@ -116,6 +121,7 @@ export class App implements OnInit, OnDestroy {
       title: 'MANAGEMENT',
       items: [
         { name: 'Expense Tracker', icon: '₹' },
+        { name: 'Enquiry Management', icon: '◎' },
         { name: 'Trainers & Staff', icon: '♟' },
         { name: 'Reports & Analytics', icon: '▥' }
       ]
@@ -370,6 +376,28 @@ export class App implements OnInit, OnDestroy {
 
   openMemberFromExpiry(member: ExpiringMember): void {
     this.memberToFocus = member;
+    this.selectMenu('Members');
+  }
+
+  requestMemberRegistration(request: any): void {
+    this.memberConversionResult = null;
+    this.memberConversionSubmission = null;
+    this.memberRegistrationRequest = request;
+    this.selectMenu('Members');
+  }
+
+  submitMemberConversion(submission: any): void {
+    this.memberConversionResult = null;
+    this.memberConversionSubmission = submission;
+    this.selectMenu('Enquiry Management');
+  }
+
+  onMemberConversionCompleted(result: any): void {
+    this.memberConversionSubmission = null;
+    this.memberConversionResult = result;
+    if (!result?.error) {
+      this.memberRegistrationRequest = null;
+    }
     this.selectMenu('Members');
   }
 

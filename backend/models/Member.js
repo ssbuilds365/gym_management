@@ -90,6 +90,12 @@ const memberSchema = new mongoose.Schema(
             default: ''
         },
 
+        sourceEnquiryId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Enquiry',
+            default: null
+        },
+
         qrTokenHash: {
             type: String,
             default: null,
@@ -116,5 +122,9 @@ memberSchema.index(
 memberSchema.index({ tenantId: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, assignedTrainerId: 1 });
+memberSchema.index(
+    { tenantId: 1, sourceEnquiryId: 1 },
+    { unique: true, partialFilterExpression: { sourceEnquiryId: { $type: 'objectId' } } }
+);
 
 module.exports = mongoose.model('Member', memberSchema);

@@ -86,7 +86,6 @@
 
           <span class="nav-icon">{{ item.icon }}</span>
           <span>{{ item.name }}</span>
-          <span *ngIf="item.name === 'Attendance'" class="nav-dot"></span>
         </button>
       </div>
     </nav>
@@ -429,7 +428,13 @@
     <!-- Members Module: inline dashboard content -->
     <div [hidden]="selectedMenu !== 'Members'">
       @defer (when selectedMenu === 'Members') {
-        <app-members [active]="selectedMenu === 'Members'" [focusMember]="memberToFocus"></app-members>
+        <app-members
+          [active]="selectedMenu === 'Members'"
+          [focusMember]="memberToFocus"
+          [registrationRequest]="memberRegistrationRequest"
+          [conversionResult]="memberConversionResult"
+          (conversionSubmitted)="submitMemberConversion($event)">
+        </app-members>
       } @placeholder {
         <section class="module-loading-skeleton" aria-label="Members loading">
           <div class="skeleton-line skeleton-title"></div>
@@ -505,6 +510,23 @@
         </section>
       } @error {
         <p class="module-load-error">Unable to load Expense Tracker.</p>
+      }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Enquiry Management'">
+      @defer (when selectedMenu === 'Enquiry Management') {
+        <app-enquiries
+          [active]="selectedMenu === 'Enquiry Management'"
+          [memberConversionSubmission]="memberConversionSubmission"
+          (memberRegistrationRequested)="requestMemberRegistration($event)"
+          (memberConversionCompleted)="onMemberConversionCompleted($event)">
+        </app-enquiries>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Enquiries loading">
+          <div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Enquiries.</p>
       }
     </div>
 

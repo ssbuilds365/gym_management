@@ -2,10 +2,12 @@
 import {
   ChangeDetectorRef,
   Component,
+  EventEmitter,
   OnDestroy,
   Input,
   OnChanges,
   OnInit,
+  Output,
   SimpleChanges
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -45,6 +47,14 @@ export class Members implements OnInit, OnChanges, OnDestroy {
   readonly appName = environment.appName;
   @Input() active = false;
   @Input() focusMember: any = null;
+  @Input() registrationRequest: any = null;
+  @Input() conversionResult: any = null;
+  @Output() conversionSubmitted = new EventEmitter<any>();
+  private handledRegistrationRequestId = '';
+  private handledConversionResultId = '';
+  registrationMemberId = '';
+  private conversionAttemptCounter = 0;
+  activeRegistrationRequest: any = null;
 
   members: any[] = [];
   plans: any[] = [];
@@ -232,6 +242,58 @@ totalDueAmount = 0;
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    const registrationRequest = changes['registrationRequest']?.currentValue;
+    if (
+      registrationRequest?.requestId &&
+      registrationRequest.requestId !== this.handledRegistrationRequestId
+    ) {
+      this.handledRegistrationRequestId = registrationRequest.requestId;
+      this.activeRegistrationRequest = registrationRequest;
+      this.openAddForm();
+      this.memberForm = {
+        ...this.memberForm,
+        fullName: registrationRequest.enquiry?.fullName || '',
+        phone: registrationRequest.enquiry?.phone || '',
+        email: registrationRequest.enquiry?.email || '',
+        gender: registrationRequest.enquiry?.gender || this.memberForm.gender,
+        age: registrationRequest.enquiry?.age ?? null,
+        planId: registrationRequest.enquiry?.planId || '',
+        joiningDate: this.registrationDate(registrationRequest.enquiry?.expectedJoiningDate) || this.memberForm.joiningDate,
+        membershipStartDate: this.registrationDate(registrationRequest.enquiry?.expectedJoiningDate) || this.memberForm.membershipStartDate,
+        notes: registrationRequest.enquiry?.notes || ''
+      };
+    }
+    const conversionResult = changes['conversionResult']?.currentValue;
+    if (
+      conversionResult?.requestId &&
+      conversionResult.requestId === this.activeRegistrationRequest?.requestId &&
+      conversionResult.attemptId !== this.handledConversionResultId
+    ) {
+      this.handledConversionResultId = conversionResult.attemptId || conversionResult.requestId;
+      this.saving = false;
+      if (conversionResult.error) {
+        this.errorMessage = conversionResult.error;
+      } else {
+        const memberId = conversionResult.member?._id || conversionResult.member?.id;
+        if (!memberId) {
+          this.errorMessage = 'Member conversion returned no member ID. Refresh Members before retrying.';
+        } else {
+          this.registrationMemberId = memberId;
+          this.createdMemberId = memberId;
+          this.errorMessage = '';
+          this.successMessage = conversionResult.message || 'Member registered successfully.';
+          if (this.memberForm.planId) {
+            this.successMessage += ' Assign the selected membership plan to complete registration.';
+          } else {
+            this.closeForm();
+            this.currentPage = 1;
+            this.loadMembers();
+            this.dashboardService.requestRefresh();
+          }
+        }
+      }
+      this.changeDetector.markForCheck();
+    }
     if (changes['focusMember']?.currentValue) {
       this.openMembershipHistory(changes['focusMember'].currentValue);
     }
@@ -254,6 +316,12 @@ totalDueAmount = 0;
     this.historySubscription?.unsubscribe();
     this.financialSubscription?.unsubscribe();
     this.qrSubscription?.unsubscribe();
+  }
+
+  private registrationDate(value: string | null | undefined): string {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
   }
 
   getEmptyForm(): any {
@@ -880,6 +948,8 @@ totalDueAmount = 0;
     this.showForm = false;
     this.createdMemberId = '';
     this.memberCreatedWithoutId = false;
+    this.registrationMemberId = '';
+    this.activeRegistrationRequest = null;
   }
 
   // Save member and optionally assign membership
@@ -910,6 +980,26 @@ totalDueAmount = 0;
     const isEditMode = this.isEditMode;
     const planId = this.memberForm.planId;
     const createdMemberId = this.createdMemberId;
+    if (this.registrationRequest?.requestId && !this.registrationMemberId) {
+      const attemptId = `${this.registrationRequest.requestId}-${++this.conversionAttemptCounter}`;
+      this.conversionSubmitted.emit({
+        requestId: this.registrationRequest.requestId,
+        attemptId,
+        enquiryId: this.registrationRequest.enquiryId,
+        planId: this.memberForm.planId || '',
+        membershipStartDate: this.memberForm.membershipStartDate || '',
+        payload: {
+          email: this.memberForm.email || '',
+          gender: this.memberForm.gender || 'Other',
+          dateOfBirth: this.memberForm.dateOfBirth || null,
+          address: this.memberForm.address || '',
+          emergencyContact: this.memberForm.emergencyContact || '',
+          joiningDate: this.memberForm.joiningDate || '',
+          notes: this.memberForm.notes || ''
+        }
+      });
+      return;
+    }
     const membershipRequest = (memberId: string) =>
       this.planService.assignMembership({
         memberId,
@@ -929,7 +1019,11 @@ totalDueAmount = 0;
           switchMap(response => {
             const memberId = isEditMode
               ? this.selectedMemberId
-              : response.member?._id || response.data?._id;
+              : response.member?._id ||
+                response.data?._id ||
+                response.data?.member?._id ||
+                response.memberId ||
+                response.data?.memberId;
 
             if (!isEditMode && planId && !memberId) {
               this.memberCreatedWithoutId = true;
