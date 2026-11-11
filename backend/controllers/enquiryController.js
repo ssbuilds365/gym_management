@@ -409,7 +409,7 @@ exports.updateEnquiry = async (req, res) => {
     const enquiry = await Enquiry.findOneAndUpdate(
       { ...enquiryFilter(req, req.params.id), status: { $ne: 'CONVERTED' } },
       { $set: { ...updates, updatedBy: req.owner._id } },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!enquiry) {
       const exists = await Enquiry.exists(enquiryFilter(req, req.params.id));
@@ -471,7 +471,7 @@ exports.updateEnquiryStatus = async (req, res) => {
           statusHistory: statusHistoryEntry(previous.status, status, req.owner._id, String(note).trim())
         }
       },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!enquiry) {
       return res.status(409).json({ success: false, message: 'Enquiry status changed; reload and retry' });
@@ -537,7 +537,7 @@ exports.addFollowUp = async (req, res) => {
     const enquiry = await Enquiry.findOneAndUpdate(
       { ...enquiryFilter(req, req.params.id), status: previous.status },
       update,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!enquiry) return res.status(409).json({ success: false, message: 'Enquiry changed; reload and retry' });
     return res.status(201).json({ success: true, message: 'Follow-up recorded', followUps: enquiry.followUps });
@@ -619,7 +619,7 @@ exports.addTrial = async (req, res) => {
     const enquiry = await Enquiry.findOneAndUpdate(
       { ...enquiryFilter(req, req.params.id), status: previous.status },
       update,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
     if (!enquiry) return res.status(409).json({ success: false, message: 'Enquiry changed; reload and retry' });
     return res.status(201).json({ success: true, message: 'Trial recorded', trials: enquiry.trials });

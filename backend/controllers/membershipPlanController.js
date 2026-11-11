@@ -87,7 +87,7 @@ const updatePlan = async (req, res) => {
       },
       updates,
       {
-        new: true,
+        returnDocument: 'after',
         runValidators: true
       }
     );

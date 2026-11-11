@@ -360,7 +360,7 @@ exports.recordSessionActivity = async (req, res) => {
         lastActivityAt: now,
         expiresAt: new Date(now.getTime() + SESSION_MAX_AGE_MS)
       }
-    }, { new: true });
+    }, { returnDocument: 'after' });
 
     if (!updated) {
       if (await respondWithLatestSession(req, res, now)) return;
@@ -412,7 +412,7 @@ exports.refreshSession = async (req, res) => {
         lastActivityAt: now,
         expiresAt: new Date(now.getTime() + SESSION_MAX_AGE_MS)
       }
-    }, { new: true });
+    }, { returnDocument: 'after' });
 
     if (!session) {
       if (await respondWithLatestSession(req, res, now)) return;
@@ -488,7 +488,7 @@ exports.revokeOwnerSession = async (req, res) => {
       revokedAt: null
     }, {
       $set: { revokedAt: new Date(), revokedReason: 'revoked' }
-    }, { new: true });
+    }, { returnDocument: 'after' });
     if (!session) {
       return res.status(404).json({ success: false, message: 'Active session not found' });
     }

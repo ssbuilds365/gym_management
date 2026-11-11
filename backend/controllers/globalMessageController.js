@@ -20,12 +20,36 @@ const responseError = (res, status, message) => res.status(status).json({
   message
 });
 
-const logControllerError = (operation, error) => {
-  if (process.env.NODE_ENV === 'production') {
-    console.error(`[global-message] ${operation} failed`);
-  } else {
-    console.error(`[global-message] ${operation} failed:`, error);
-  }
+const redactLogValue = (value, search) => {
+  let safeValue = String(value || '');
+  if (search) safeValue = safeValue.split(search).join('[redacted-search]');
+  return safeValue
+    .replace(/mongodb(?:\+srv)?:\/\/[^\s"'`]+/gi, '[redacted-mongodb-uri]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted-token]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .replace(/(^|[^\d])((?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9})(?!\d)/gm, '$1[redacted-mobile]');
+};
+
+const logControllerError = (operation, error, context = {}) => {
+  const search = typeof context.search === 'string' ? context.search : '';
+  const safeError = error instanceof Error ? error : new Error(String(error));
+  console.error(`[global-message] ${operation} failed`, {
+    name: safeError.name,
+    message: redactLogValue(safeError.message, search),
+    stack: redactLogValue(safeError.stack || '', search),
+    code: safeError.code || undefined,
+    context: {
+      filter: context.filter,
+      page: context.page,
+      limit: context.limit,
+      searchProvided: Boolean(search),
+      tenantIdValid: mongoose.isValidObjectId(context.tenantId),
+      businessIdValid: mongoose.isValidObjectId(context.businessId),
+      memberCollection: Member.collection.name,
+      membershipCollection: MemberMembership.collection.name
+    }
+  });
 };
 
 const parsePage = (value, fallback, max) => {
@@ -294,7 +318,14 @@ const getEligible = async (req, res) => {
       invalidNumberCount: result.invalid?.[0]?.value || 0
     });
   } catch (error) {
-    logControllerError('member lookup', error);
+    logControllerError('member lookup', error, {
+      filter: typeof req.query.filter === 'string' ? req.query.filter : undefined,
+      page: typeof req.query.page === 'string' ? req.query.page : undefined,
+      limit: typeof req.query.limit === 'string' ? req.query.limit : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : '',
+      tenantId: req.tenantId,
+      businessId: req.owner?.businessId
+    });
     return responseError(res, 500, 'Unable to load eligible members.');
   }
 };

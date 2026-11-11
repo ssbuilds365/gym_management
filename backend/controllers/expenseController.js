@@ -682,7 +682,7 @@ exports.updateExpenseRetention = async (req, res) => {
     const business = await Business.findOneAndUpdate(
       { _id: req.tenantId },
       { $set: { expenseRetentionMonths: retentionMonths } },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select('expenseRetentionMonths').lean();
     if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
     return res.json({

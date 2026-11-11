@@ -220,7 +220,7 @@ exports.updateSettings = async (req, res) => {
     const business = await Business.findOneAndUpdate(
       { _id: req.tenantId },
       { $set: updates },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select(settingsProjection);
     if (!business) {
       return res.status(404).json({ success: false, message: 'Business not found' });
@@ -269,7 +269,7 @@ exports.uploadBusinessLogo = async (req, res) => {
           }
         }
       },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select(settingsProjection);
 
     if (!business) throw new Error('Business profile was not updated');
@@ -322,7 +322,7 @@ exports.removeBusinessLogo = async (req, res) => {
     const business = await Business.findOneAndUpdate(
       { _id: req.tenantId },
       { $set: { logoUrl: '', logoStorage: null } },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select(settingsProjection);
     if (!business) return res.status(404).json({ success: false, message: 'Business not found' });
 

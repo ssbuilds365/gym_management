@@ -434,7 +434,7 @@ exports.refundTrainerPTPayment = async (req, res) => {
         collectedAmountMinor: { $gte: refundMinor }
       }, {
         $inc: { collectedAmountMinor: -refundMinor }
-      }, { new: true, session });
+      }, { returnDocument: 'after', session });
       if (!ptPackage) {
         const error = new Error('PT package collection balance could not be verified');
         error.statusCode = 409;

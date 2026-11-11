@@ -317,7 +317,7 @@ exports.updateMember = async (req, res) => {
       },
       { $set: updates },
       {
-        new: true,
+        returnDocument: 'after',
         runValidators: true
       }
     );

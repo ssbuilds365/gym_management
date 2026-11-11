@@ -380,7 +380,7 @@ exports.assignMemberToTrainer = async (req, res) => {
         status: 'Active'
       },
       { $set: { assignedTrainerId: trainer._id } },
-      { new: true }
+      { returnDocument: 'after' }
     ).select('_id fullName phone assignedTrainerId').lean();
     if (!member) return res.status(404).json({ success: false, message: 'Member not found in this business' });
     return res.json({ success: true, member });
