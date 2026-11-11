@@ -1,0 +1,691 @@
+:host {
+  display: block;
+  color: #242733;
+}
+
+.global-message-page {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.page-heading,
+.panel-heading,
+.recipient-heading,
+.table-footer,
+.progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-heading h1 {
+  margin: 5px 0;
+  font-size: clamp(24px, 3vw, 32px);
+}
+
+.page-heading p,
+.panel-heading p {
+  margin: 0;
+  color: #727887;
+  font-size: 13px;
+}
+
+.eyebrow,
+.step-label {
+  color: #b51f2b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.step-label {
+  display: inline-block;
+  margin-bottom: 5px;
+  font-size: 9px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.primary-btn,
+.secondary-btn,
+.danger-btn {
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 13px;
+  font-weight: 700;
+}
+
+.primary-btn {
+  color: #fff;
+  background: #b51f2b;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: #921924;
+}
+
+.secondary-btn {
+  color: #333844;
+  background: #f0f1f4;
+}
+
+.danger-btn {
+  color: #9c1d27;
+  background: #fff0f1;
+}
+
+.feedback {
+  margin: 0;
+  border-radius: 9px;
+  padding: 11px 14px;
+}
+
+.feedback.error {
+  color: #9c1d27;
+  background: #fff0f1;
+}
+
+.feedback.success {
+  color: #146a3b;
+  background: #eaf8ef;
+}
+
+.feedback button {
+  margin-left: 12px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-card,
+.panel {
+  border: 1px solid #e8e9ed;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 5px 18px rgb(21 26 38 / 4%);
+}
+
+.summary-card {
+  display: grid;
+  min-height: 112px;
+  align-content: space-between;
+  gap: 8px;
+  padding: 15px;
+}
+
+.summary-card > span {
+  color: #6b7180;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.summary-card strong {
+  font-size: clamp(20px, 2vw, 27px);
+}
+
+.summary-card small {
+  color: #858b97;
+  font-size: 10px;
+}
+
+.summary-card.opened strong {
+  color: #137da0;
+}
+
+.summary-card.sent strong {
+  color: #18764b;
+}
+
+.summary-card.pending strong {
+  color: #b46a0c;
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.panel-heading {
+  margin-bottom: 16px;
+}
+
+.panel-heading h2 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+
+.campaign-actions,
+.recipient-actions,
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-label {
+  margin: 10px 0 8px;
+  color: #646a77;
+  font-size: 12px;
+}
+
+.progress-label strong {
+  color: #b51f2b;
+}
+
+.progress-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #eceef2;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #b51f2b;
+  transition: width .2s ease;
+}
+
+.campaign-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 14px 0 20px;
+  color: #727887;
+  font-size: 11px;
+}
+
+.campaign-totals strong {
+  margin-left: 4px;
+  color: #242733;
+}
+
+.current-recipient {
+  border-top: 1px solid #eceef2;
+  padding-top: 17px;
+}
+
+.recipient-heading {
+  margin-bottom: 12px;
+}
+
+.recipient-heading h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.recipient-heading p {
+  margin: 0;
+  color: #727887;
+  font-size: 12px;
+}
+
+.whatsapp-btn {
+  min-height: 39px;
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 14px;
+  color: #fff;
+  background: #16834b;
+  font-weight: 750;
+}
+
+.whatsapp-btn:hover:not(:disabled) {
+  background: #116b3d;
+}
+
+.message-preview {
+  min-height: 74px;
+  margin: 0;
+  padding: 14px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  border: 1px solid #e8e9ed;
+  border-radius: 10px;
+  color: #343846;
+  background: #fafbfc;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.owner-warning,
+.preview-footnote,
+.delivery-note {
+  color: #737987;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.owner-warning {
+  margin: 10px 0 13px;
+  color: #8d5c0b;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: minmax(160px, .7fr) minmax(220px, 1.2fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.filter-row label,
+.field-label {
+  display: grid;
+  gap: 6px;
+  color: #4e5360;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.filter-row input,
+.filter-row select,
+.field-label input,
+.field-label select,
+.field-label textarea {
+  width: 100%;
+  min-height: 39px;
+  border: 1px solid #dfe1e6;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #242733;
+  background: #fff;
+  outline: none;
+}
+
+.field-label textarea {
+  min-height: 170px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #b51f2b;
+  box-shadow: 0 0 0 3px rgb(181 31 43 / 9%);
+}
+
+.eligible-count {
+  padding-bottom: 11px;
+  color: #727887;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.number-warning {
+  margin: 0 0 12px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #8d5c0b;
+  background: #fff7e7;
+  font-size: 11px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+th {
+  padding: 11px 10px;
+  color: #7a7f8c;
+  background: #fafbfc;
+  font-size: 9px;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+td {
+  padding: 11px 10px;
+  border-bottom: 1px solid #eff0f3;
+  color: #464b57;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+td strong {
+  color: #262a36;
+}
+
+td input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #b51f2b;
+}
+
+.empty-state {
+  padding: 25px 12px;
+  color: #848a97;
+  text-align: center;
+  font-size: 12px;
+}
+
+.table-footer {
+  margin-top: 13px;
+  color: #727887;
+  font-size: 11px;
+}
+
+.pagination {
+  justify-content: flex-end;
+}
+
+.pagination .secondary-btn {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 10px;
+}
+
+.selected-list {
+  margin-top: 17px;
+  border-top: 1px solid #eff0f3;
+  padding-top: 13px;
+}
+
+.selected-chip-list,
+.variable-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 99px;
+  padding: 5px 8px 5px 10px;
+  color: #414654;
+  background: #f2f3f6;
+  font-size: 10px;
+}
+
+.selected-chip button,
+.text-btn {
+  border: 0;
+  padding: 3px;
+  color: #a11b27;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.selected-chip button {
+  color: #636875;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.composer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr);
+  gap: 14px;
+}
+
+.field-label {
+  margin-bottom: 13px;
+}
+
+.field-label > span {
+  color: #8a8e99;
+  font-weight: 400;
+}
+
+.character-count {
+  margin: -7px 0 15px;
+  color: #858b97;
+  text-align: right;
+  font-size: 10px;
+}
+
+.variables {
+  margin-bottom: 15px;
+}
+
+.variables strong {
+  font-size: 11px;
+}
+
+.variables p {
+  margin: 5px 0;
+  color: #858b97;
+  font-size: 10px;
+}
+
+.variable-list button {
+  border: 1px solid #ead3d5;
+  border-radius: 99px;
+  padding: 6px 9px;
+  color: #a11b27;
+  background: #fff8f8;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.start-btn {
+  width: 100%;
+}
+
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-panel .message-preview {
+  flex: 1;
+}
+
+.preview-footnote {
+  margin: 11px 0 0;
+}
+
+.message-snippet {
+  display: block;
+  max-width: 210px;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #858b97;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.status-pill {
+  display: inline-block;
+  border-radius: 99px;
+  padding: 5px 8px;
+  color: #545a66;
+  background: #f1f2f5;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.status-pill[data-status="IN_PROGRESS"],
+.status-pill[data-status="WHATSAPP_OPENED"] {
+  color: #126d91;
+  background: #e8f6fb;
+}
+
+.status-pill[data-status="COMPLETED"],
+.status-pill[data-status="MANUALLY_MARKED_SENT"] {
+  color: #176f45;
+  background: #eaf8ef;
+}
+
+.status-pill[data-status="PAUSED"],
+.status-pill[data-status="PENDING"] {
+  color: #8d5c0b;
+  background: #fff7e7;
+}
+
+.status-pill[data-status="STOPPED"],
+.status-pill[data-status="SKIPPED"],
+.status-pill[data-status="INVALID_NUMBER"] {
+  color: #8c323a;
+  background: #fff0f1;
+}
+
+.history-actions {
+  white-space: nowrap;
+}
+
+.history-actions .text-btn + .text-btn {
+  margin-left: 5px;
+}
+
+.campaign-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: #636875;
+  font-size: 11px;
+}
+
+.details-summary {
+  color: #727887;
+  font-size: 11px;
+}
+
+.delivery-note {
+  margin: 0;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .filter-row {
+    grid-template-columns: 1fr 1.4fr;
+  }
+
+  .eligible-count {
+    grid-column: 1 / -1;
+    padding: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .global-message-page {
+    gap: 13px;
+    padding: 14px;
+  }
+
+  .page-heading,
+  .panel-heading,
+  .recipient-heading {
+    align-items: flex-start;
+  }
+
+  .page-heading {
+    flex-direction: column;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-card {
+    min-height: 100px;
+    padding: 12px;
+  }
+
+  .summary-card > span {
+    font-size: 11px;
+  }
+
+  .campaign-panel,
+  .members-panel,
+  .composer-panel,
+  .preview-panel,
+  .history-panel,
+  .details-panel {
+    padding: 14px;
+  }
+
+  .panel-heading {
+    flex-direction: column;
+  }
+
+  .campaign-actions {
+    width: 100%;
+  }
+
+  .filter-row,
+  .composer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eligible-count {
+    grid-column: auto;
+  }
+
+  .recipient-heading {
+    flex-direction: column;
+  }
+
+  .whatsapp-btn {
+    width: 100%;
+  }
+
+  .recipient-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .table-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pagination {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .campaign-totals {
+    gap: 8px 14px;
+  }
+}
+
+@media (max-width: 400px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

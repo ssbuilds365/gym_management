@@ -1,0 +1,297 @@
+<section class="global-message-page">
+  <header class="page-heading">
+    <div>
+      <span class="eyebrow">BUSINESS MANAGEMENT</span>
+      <h1>Global Message</h1>
+      <p>Prepare personalized messages and open each member's WhatsApp chat to send manually.</p>
+    </div>
+    <button type="button" class="secondary-btn" (click)="loadDashboard()" [disabled]="dashboardLoading || loadingMembers || actionLoading">
+      {{ dashboardLoading ? 'Refreshing…' : 'Refresh' }}
+    </button>
+  </header>
+
+  <p class="feedback success" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+  <div class="feedback error" *ngIf="errorMessage" role="alert">
+    <span>{{ errorMessage }}</span>
+    <button type="button" (click)="loadDashboard()">Retry</button>
+  </div>
+
+  <section class="summary-grid" aria-label="Global message summary">
+    <article class="summary-card">
+      <span>Total Members</span><strong>{{ totalMembers | number }}</strong>
+      <small>Registered members in this gym</small>
+    </article>
+    <article class="summary-card">
+      <span>Selected Members</span><strong>{{ selectedCount | number }}</strong>
+      <small>Current selection · valid numbers only</small>
+    </article>
+    <article class="summary-card opened">
+      <span>WhatsApp Opened</span><strong>{{ campaignSummary.whatsappOpened | number }}</strong>
+      <small>Chats opened in the current campaign</small>
+    </article>
+    <article class="summary-card sent">
+      <span>Manually Marked Sent</span><strong>{{ campaignSummary.manuallyMarkedSent | number }}</strong>
+      <small>Owner-confirmed only · not delivery status</small>
+    </article>
+    <article class="summary-card pending">
+      <span>Pending Members</span><strong>{{ campaignSummary.pending | number }}</strong>
+      <small>Not yet sent or skipped</small>
+    </article>
+  </section>
+
+  <section class="panel campaign-panel" *ngIf="activeCampaign as campaign">
+    <header class="panel-heading">
+      <div>
+        <span class="step-label">CAMPAIGN PROGRESS</span>
+        <h2>{{ campaign.name || 'Untitled campaign' }}</h2>
+        <p>{{ statusLabel(campaign.status) }} · Created {{ formatDate(campaign.createdAt) }}</p>
+      </div>
+      <div class="campaign-actions">
+        <button type="button" class="secondary-btn" *ngIf="campaign.status === 'IN_PROGRESS'"
+          (click)="pauseCampaign()" [disabled]="actionLoading">Pause Campaign</button>
+        <button type="button" class="secondary-btn" *ngIf="campaign.status === 'PAUSED' || campaign.status === 'DRAFT'"
+          (click)="resumeCampaign()" [disabled]="actionLoading">Resume Campaign</button>
+        <button type="button" class="danger-btn" *ngIf="campaign.status === 'IN_PROGRESS' || campaign.status === 'PAUSED' || campaign.status === 'DRAFT'"
+          (click)="stopCampaign()" [disabled]="actionLoading">Stop Campaign</button>
+      </div>
+    </header>
+
+    <div class="progress-label">
+      <span>{{ campaignSummary.manuallyMarkedSent + campaignSummary.skipped + campaignSummary.invalidNumber }}
+        of {{ campaignSummary.totalRecipients }} recipients processed</span>
+      <strong>{{ progressPercent }}%</strong>
+    </div>
+    <div class="progress-track" role="progressbar" [attr.aria-valuenow]="progressPercent"
+      aria-valuemin="0" aria-valuemax="100">
+      <span [style.width.%]="progressPercent"></span>
+    </div>
+    <div class="campaign-totals">
+      <span>Total <strong>{{ campaignSummary.totalRecipients }}</strong></span>
+      <span>Opened <strong>{{ campaignSummary.whatsappOpened }}</strong></span>
+      <span>Manually sent <strong>{{ campaignSummary.manuallyMarkedSent }}</strong></span>
+      <span>Skipped <strong>{{ campaignSummary.skipped }}</strong></span>
+      <span>Pending <strong>{{ campaignSummary.pending }}</strong></span>
+    </div>
+
+    <div class="current-recipient" *ngIf="currentRecipient as recipient">
+      <div class="recipient-heading">
+        <div>
+          <span class="step-label">CURRENT MEMBER</span>
+          <h3>{{ recipient.memberName }}</h3>
+          <p>+{{ recipient.mobile }} · {{ statusLabel(recipient.status) }}</p>
+        </div>
+        <button type="button" class="whatsapp-btn" (click)="openWhatsApp()"
+          [disabled]="actionLoading || campaign.status !== 'IN_PROGRESS' || recipient.status !== 'PENDING'">
+          Open WhatsApp
+        </button>
+      </div>
+      <pre class="message-preview">{{ campaignMessage(recipient) }}</pre>
+      <p class="owner-warning">WhatsApp does not report delivery or read status. Send the message in WhatsApp yourself, then confirm here.</p>
+      <div class="recipient-actions">
+        <button type="button" class="primary-btn" (click)="markAsSent()"
+          [disabled]="actionLoading || campaign.status !== 'IN_PROGRESS' || recipient.status !== 'WHATSAPP_OPENED'">
+          Mark as Sent
+        </button>
+        <button type="button" class="secondary-btn" (click)="skipMember()"
+          [disabled]="actionLoading || campaign.status !== 'IN_PROGRESS' || (recipient.status !== 'PENDING' && recipient.status !== 'WHATSAPP_OPENED')">
+          Skip Member
+        </button>
+        <button type="button" class="secondary-btn" (click)="nextMember()"
+          [disabled]="actionLoading || campaign.status !== 'IN_PROGRESS' || (recipient.status !== 'MANUALLY_MARKED_SENT' && recipient.status !== 'SKIPPED')">
+          Next Member
+        </button>
+      </div>
+    </div>
+    <div class="empty-state" *ngIf="!currentRecipient && campaign.status === 'COMPLETED'">
+      All campaign recipients have been processed.
+    </div>
+    <div class="empty-state" *ngIf="!currentRecipient && campaign.status !== 'COMPLETED'">
+      No current recipient. Resume the campaign to continue.
+    </div>
+  </section>
+
+  <section class="panel members-panel">
+    <header class="panel-heading">
+      <div>
+        <span class="step-label">STEP 1</span>
+        <h2>Select Members</h2>
+        <p>Only members with a valid Indian mobile number are selectable.</p>
+      </div>
+      <button type="button" class="secondary-btn" (click)="selectAllFiltered()" [disabled]="selectionLoading || loadingMembers">
+        {{ selectionLoading ? 'Loading members…' : 'Select All Filtered' }}
+      </button>
+    </header>
+
+    <div class="filter-row">
+      <label>Member group
+        <select [(ngModel)]="selectedFilter" (ngModelChange)="onFilterChange()">
+          <option *ngFor="let filter of filters" [value]="filter.value">{{ filter.label }}</option>
+        </select>
+      </label>
+      <label class="search-label">Search by name or mobile
+        <input type="search" [(ngModel)]="search" (ngModelChange)="onSearchChange()"
+          placeholder="Search members">
+      </label>
+      <span class="eligible-count">{{ totalEligible | number }} eligible members</span>
+    </div>
+    <p class="number-warning" *ngIf="invalidNumberCount">
+      {{ invalidNumberCount }} member(s) in this result do not have a valid mobile number and cannot be selected.
+    </p>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr><th aria-label="Select"></th><th>MEMBER</th><th>MOBILE</th><th>PLAN</th><th>EXPIRY DATE</th><th>PENDING FEE</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngIf="loadingMembers"><td colspan="6" class="empty-state">Loading eligible members…</td></tr>
+          <tr *ngFor="let member of members">
+            <td><input type="checkbox" [checked]="isSelected(member)"
+              (change)="toggleMember(member, $any($event.target).checked)"
+              [attr.aria-label]="'Select ' + member.fullName"></td>
+            <td><strong>{{ member.fullName }}</strong></td>
+            <td>+{{ member.normalizedMobile }}</td>
+            <td>{{ member.planName || '—' }}</td>
+            <td>{{ member.membership?.endDate ? formatDate(member.membership.endDate) : '—' }}</td>
+            <td>{{ (member.pendingAmount || 0) | currency:'INR':'symbol':'1.0-2' }}</td>
+          </tr>
+          <tr *ngIf="!loadingMembers && !members.length">
+            <td colspan="6" class="empty-state">No eligible members match these filters.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer">
+      <span>{{ selectedCount }} selected</span>
+      <div class="pagination">
+        <button type="button" class="secondary-btn" (click)="setPage(page - 1)" [disabled]="page <= 1 || loadingMembers">Previous</button>
+        <span>Page {{ page }} of {{ totalPages || 1 }}</span>
+        <button type="button" class="secondary-btn" (click)="setPage(page + 1)" [disabled]="page >= totalPages || loadingMembers">Next</button>
+      </div>
+    </footer>
+    <div class="selected-list" *ngIf="selectedCount">
+      <span class="step-label">SELECTED MEMBERS</span>
+      <div class="selected-chip-list">
+        <span class="selected-chip" *ngFor="let entry of selectedMembers | keyvalue">
+          {{ entry.value.fullName }}
+          <button type="button" (click)="removeSelected(entry.key)" [attr.aria-label]="'Remove ' + entry.value.fullName">×</button>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <section class="composer-grid">
+    <article class="panel composer-panel">
+      <header class="panel-heading">
+        <div><span class="step-label">STEP 2</span><h2>Write Common Message</h2></div>
+        <button type="button" class="text-btn" (click)="clearMessage()" [disabled]="!message">Clear message</button>
+      </header>
+      <label class="field-label">Campaign name <span>(optional)</span>
+        <input type="text" [(ngModel)]="campaignName" maxlength="120" placeholder="e.g. Membership renewal reminder">
+      </label>
+      <label class="field-label">Message
+        <textarea [(ngModel)]="message" maxlength="4000" rows="9"
+          placeholder="Write a message for your selected members…"></textarea>
+      </label>
+      <div class="character-count">{{ message.length }} / 4000 characters</div>
+      <div class="variables">
+        <strong>Available variables</strong>
+        <p>Click a variable to add it to your message. Missing values are left blank.</p>
+        <div class="variable-list">
+          <button type="button" *ngFor="let variable of variables" (click)="addVariable(variable)">{{ variable }}</button>
+        </div>
+      </div>
+      <button type="button" class="primary-btn start-btn" (click)="startCampaign()"
+        [disabled]="savingCampaign || actionLoading || !selectedCount || !message.trim()">
+        {{ savingCampaign ? 'Starting…' : 'Start Campaign' }}
+      </button>
+    </article>
+
+    <article class="panel preview-panel">
+      <header class="panel-heading">
+        <div><span class="step-label">STEP 3</span><h2>Personalized Preview</h2></div>
+      </header>
+      <label class="field-label" *ngIf="selectedCount">Preview using
+        <select [(ngModel)]="sampleMemberId">
+          <option *ngFor="let entry of selectedMembers | keyvalue" [value]="entry.key">{{ entry.value.fullName }}</option>
+        </select>
+      </label>
+      <p class="empty-state" *ngIf="!selectedCount">Select members to preview their personalized message.</p>
+      <pre class="message-preview" *ngIf="selectedCount">{{ previewMessage }}</pre>
+      <p class="preview-footnote">The message is prepared in WhatsApp only after you click Open WhatsApp. It is never sent automatically.</p>
+    </article>
+  </section>
+
+  <section class="panel history-panel">
+    <header class="panel-heading">
+      <div><span class="step-label">CAMPAIGN HISTORY</span><h2>Previous Campaigns</h2></div>
+    </header>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr><th>CAMPAIGN</th><th>CREATED</th><th>RECIPIENTS</th><th>OPENED</th><th>MANUALLY SENT</th><th>SKIPPED</th><th>PENDING</th><th>STATUS</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let campaign of history">
+            <td><strong>{{ campaign.name || 'Untitled campaign' }}</strong><small class="message-snippet">{{ campaign.message }}</small></td>
+            <td>{{ formatDate(campaign.createdAt) }}</td>
+            <td>{{ campaign.totalRecipients }}</td>
+            <td>{{ campaign.whatsappOpened }}</td>
+            <td>{{ campaign.manuallyMarkedSent }}</td>
+            <td>{{ campaign.skipped }}</td>
+            <td>{{ campaign.pending }}</td>
+            <td><span class="status-pill" [attr.data-status]="campaign.status">{{ statusLabel(campaign.status) }}</span></td>
+            <td class="history-actions">
+              <button type="button" class="text-btn" (click)="showCampaignDetails(campaign)">View details</button>
+              <button type="button" class="text-btn" *ngIf="campaign.status === 'DRAFT' || campaign.status === 'PAUSED'"
+                (click)="startExistingCampaign(campaign)" [disabled]="actionLoading">Resume</button>
+            </td>
+          </tr>
+          <tr *ngIf="!history.length"><td colspan="9" class="empty-state">Campaign history will appear here.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer" *ngIf="historyTotalPages > 1">
+      <span>Page {{ historyPage }} of {{ historyTotalPages }}</span>
+      <div class="pagination">
+        <button type="button" class="secondary-btn" (click)="loadHistory(historyPage - 1)" [disabled]="historyPage <= 1">Previous</button>
+        <button type="button" class="secondary-btn" (click)="loadHistory(historyPage + 1)" [disabled]="historyPage >= historyTotalPages">Next</button>
+      </div>
+    </footer>
+  </section>
+
+  <section class="panel details-panel" *ngIf="detailsCampaign">
+    <header class="panel-heading">
+      <div><span class="step-label">RECIPIENT PROGRESS</span><h2>{{ detailsCampaign.name || 'Untitled campaign' }}</h2></div>
+      <button type="button" class="text-btn" (click)="detailsCampaign = null">Close details</button>
+    </header>
+    <p class="campaign-message">{{ detailsCampaign.message }}</p>
+    <p class="details-summary">
+      {{ detailSummary.totalRecipients }} recipients · {{ detailSummary.whatsappOpened }} opened ·
+      {{ detailSummary.manuallyMarkedSent }} manually sent · {{ detailSummary.skipped }} skipped ·
+      {{ detailSummary.pending }} pending
+    </p>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>MEMBER</th><th>MOBILE</th><th>STATUS</th><th>OPENED</th><th>MANUALLY MARKED SENT</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let recipient of detailRecipients">
+            <td>{{ recipient.memberName }}</td><td>+{{ recipient.mobile }}</td>
+            <td><span class="status-pill" [attr.data-status]="recipient.status">{{ statusLabel(recipient.status) }}</span></td>
+            <td>{{ recipient.whatsappOpenedAt ? formatDate(recipient.whatsappOpenedAt) : '—' }}</td>
+            <td>{{ recipient.manuallyMarkedSentAt ? formatDate(recipient.manuallyMarkedSentAt) : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer" *ngIf="detailTotalPages > 1">
+      <span>Page {{ detailPage }} of {{ detailTotalPages }}</span>
+      <div class="pagination">
+        <button type="button" class="secondary-btn" (click)="showCampaignDetails(detailsCampaign, detailPage - 1)" [disabled]="detailPage <= 1">Previous</button>
+        <button type="button" class="secondary-btn" (click)="showCampaignDetails(detailsCampaign, detailPage + 1)" [disabled]="detailPage >= detailTotalPages">Next</button>
+      </div>
+    </footer>
+  </section>
+
+  <p class="delivery-note">WhatsApp Click-to-Chat does not provide delivery or read confirmations. “Manually marked sent” records only your confirmation.</p>
+</section>

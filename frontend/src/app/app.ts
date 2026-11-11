@@ -17,6 +17,7 @@ import { BusinessSettings } from './pages/settings/settings';
 import { ExpiringMember, MembershipExpiry } from './pages/membership-expiry/membership-expiry';
 import { ExpenseTracker } from './pages/expenses/expense-tracker';
 import { Enquiries } from './pages/enquiries/enquiries';
+import { GlobalMessage } from './pages/global-message/global-message';
 import { DatabaseStorage } from './pages/database-storage/database-storage';
 import { SessionActivityService } from './services/session-activity';
 
@@ -38,6 +39,7 @@ import { environment } from '../environments/environment';
     MembershipExpiry,
     ExpenseTracker,
     Enquiries,
+    GlobalMessage,
     DatabaseStorage
   ],
   templateUrl: './app.html',
@@ -122,6 +124,7 @@ export class App implements OnInit, OnDestroy {
       items: [
         { name: 'Expense Tracker', icon: '₹' },
         { name: 'Enquiry Management', icon: '◎' },
+        { name: 'Global Message', icon: '◉' },
         { name: 'Trainers & Staff', icon: '♟' },
         { name: 'Reports & Analytics', icon: '▥' }
       ]
@@ -264,7 +267,9 @@ export class App implements OnInit, OnDestroy {
           if (error.status === 401) {
             const reason = error.error?.code === 'SESSION_EXPIRED' ? 'expired'
               : error.error?.code === 'SESSION_REVOKED' ? 'revoked'
-                : '';
+                : error.error?.code === 'SESSION_REQUIRED' ||
+                  error.error?.code === 'SESSION_INVALID' ? 'required'
+                  : '';
             this.handleInvalidSession(reason);
           } else {
             this.isAuthenticated = false;

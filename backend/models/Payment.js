@@ -127,6 +127,7 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ tenantId: 1, memberId: 1, paymentDate: -1 });
+paymentSchema.index({ tenantId: 1, businessId: 1, membershipId: 1, status: 1 });
 paymentSchema.index({ tenantId: 1, status: 1 });
 paymentSchema.index({ tenantId: 1, paymentDate: -1 });
 paymentSchema.index({ tenantId: 1, attributedTrainerId: 1, status: 1, paymentDate: -1 });

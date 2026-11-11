@@ -64,6 +64,7 @@ app.use('/api/business', require('./routes/businessRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/expenses', require('./routes/expenseRoutes'));
 app.use('/api/system', require('./routes/systemRoutes'));
+app.use('/api/global-messages', require('./routes/globalMessageRoutes'));
 
 // Root Route
 app.get('/', (req, res) => {

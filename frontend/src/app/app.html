@@ -530,6 +530,22 @@
       }
     </div>
 
+    <div [hidden]="selectedMenu !== 'Global Message'">
+      @defer (when selectedMenu === 'Global Message') {
+        <app-global-message
+          [active]="selectedMenu === 'Global Message'"
+          [businessName]="businessName"
+          [timeZone]="dashboardTimeZone">
+        </app-global-message>
+      } @placeholder {
+        <section class="module-loading-skeleton" aria-label="Global Message loading">
+          <div class="skeleton-line skeleton-title"></div><div class="skeleton-card"></div>
+        </section>
+      } @error {
+        <p class="module-load-error">Unable to load Global Message.</p>
+      }
+    </div>
+
     <div [hidden]="selectedMenu !== 'Reports & Analytics'">
       @defer (when selectedMenu === 'Reports & Analytics') {
         <app-reports></app-reports>
