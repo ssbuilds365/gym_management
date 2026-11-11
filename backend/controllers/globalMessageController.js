@@ -5,7 +5,7 @@ const Member = require('../models/Member');
 const MemberMembership = require('../models/MemberMembership');
 const MembershipPlan = require('../models/MembershipPlan');
 const Payment = require('../models/Payment');
-const { campaignSummary } = require('../utils/globalMessage');
+const { campaignSummary, normalizeIndianMobile } = require('../utils/globalMessage');
 const {
   DEFAULT_TIME_ZONE,
   getMembershipExpiryWindow,
@@ -65,196 +65,117 @@ const getTenantExpiryWindow = async tenantId => {
   return getMembershipExpiryWindow(new Date(), timeZone);
 };
 
-const memberPipeline = ({ tenantId, businessId, search, filter, memberIds, window }) => {
-  const baseMatch = {
-    tenantId,
-    businessId,
-    deletedAt: null
-  };
-  if (memberIds) baseMatch._id = { $in: memberIds };
-
-  const pipeline = [
-    { $match: baseMatch },
-    {
-      $set: {
-        phoneDigits: {
-          $regexReplace: { input: { $ifNull: ['$phone', ''] }, regex: '[^0-9]', replacement: '' }
-        }
-      }
-    },
-    {
-      $set: {
-        normalizedMobile: {
-          $switch: {
-            branches: [
-              {
-                case: { $regexMatch: { input: '$phoneDigits', regex: '^[6-9][0-9]{9}$' } },
-                then: { $concat: ['91', '$phoneDigits'] }
-              },
-              {
-                case: { $regexMatch: { input: '$phoneDigits', regex: '^0[6-9][0-9]{9}$' } },
-                then: { $concat: ['91', { $substrCP: ['$phoneDigits', 1, 10] }] }
-              },
-              {
-                case: { $regexMatch: { input: '$phoneDigits', regex: '^91[6-9][0-9]{9}$' } },
-                then: '$phoneDigits'
-              }
-            ],
-            default: ''
-          }
-        }
-      }
-    },
-    {
-      $lookup: {
-        from: MemberMembership.collection.name,
-        let: { memberId: '$_id' },
-        pipeline: [
-          {
-            $match: {
-              status: { $in: ['Active', 'Expired'] },
-              $expr: {
-                $and: [
-                  { $eq: ['$memberId', '$$memberId'] },
-                  { $eq: ['$tenantId', tenantId] },
-                  { $eq: ['$businessId', businessId] }
-                ]
-              }
-            }
-          },
-          { $sort: { startDate: -1, createdAt: -1 } },
-          { $limit: 1 },
-          { $project: { _id: 1, planId: 1, startDate: 1, endDate: 1, planPrice: 1, status: 1 } }
-        ],
-        as: 'membershipResults'
-      }
-    },
-    { $set: { membership: { $arrayElemAt: ['$membershipResults', 0] } } },
-    {
-      $lookup: {
-        from: MembershipPlan.collection.name,
-        let: { planId: '$membership.planId' },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$_id', '$$planId'] },
-                  { $eq: ['$tenantId', tenantId] },
-                  { $eq: ['$businessId', businessId] }
-                ]
-              }
-            }
-          },
-          { $project: { planName: 1 } }
-        ],
-        as: 'planResults'
-      }
-    },
-    { $set: { plan: { $arrayElemAt: ['$planResults', 0] } } },
-    {
-      $lookup: {
-        from: Payment.collection.name,
-        let: { membershipId: '$membership._id' },
-        pipeline: [
-          {
-            $match: {
-              tenantId,
-              businessId,
-              status: 'Success',
-              $expr: { $eq: ['$membershipId', '$$membershipId'] }
-            }
-          },
-          { $group: { _id: null, paidAmount: { $sum: '$amount' } } }
-        ],
-        as: 'paymentTotals'
-      }
-    },
-    {
-      $set: {
-        pendingAmount: {
-          $max: [
-            0,
-            {
-              $subtract: [
-                { $ifNull: ['$membership.planPrice', 0] },
-                { $ifNull: [{ $arrayElemAt: ['$paymentTotals.paidAmount', 0] }, 0] }
-              ]
-            }
-          ]
-        }
-      }
-    },
-    {
-      $set: {
-        expiryCategory: {
-          $switch: {
-            branches: [
-              {
-                case: { $lt: ['$membership.endDate', window.todayStart] },
-                then: 'expired'
-              },
-              {
-                case: {
-                  $and: [
-                    { $gte: ['$membership.endDate', window.todayStart] },
-                    { $lt: ['$membership.endDate', window.tomorrowStart] },
-                    { $lt: ['$membership.startDate', window.tomorrowStart] }
-                  ]
-                },
-                then: 'today'
-              },
-              {
-                case: {
-                  $and: [
-                    { $gte: ['$membership.endDate', window.tomorrowStart] },
-                    { $lt: ['$membership.endDate', window.next8DayStart] },
-                    { $lt: ['$membership.startDate', window.tomorrowStart] }
-                  ]
-                },
-                then: 'expiringSoon'
-              }
-            ],
-            default: 'active'
-          }
-        }
-      }
-    }
-  ];
-
+const buildMemberFilter = ({ tenantId, businessId, search = '', memberIds }) => {
+  const memberFilter = { tenantId, businessId, deletedAt: null };
+  if (memberIds) memberFilter._id = { $in: memberIds };
   if (search) {
     const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const digitsSearch = search.replace(/\D/g, '');
-    pipeline.push({
-      $match: {
-        $or: [
-          { fullName: { $regex: safeSearch, $options: 'i' } },
-          { phone: { $regex: safeSearch, $options: 'i' } },
-          ...(digitsSearch ? [{ normalizedMobile: { $regex: digitsSearch } }] : [])
-        ]
-      }
-    });
+    memberFilter.$or = [
+      { fullName: { $regex: safeSearch, $options: 'i' } },
+      { phone: { $regex: safeSearch, $options: 'i' } }
+    ];
+  }
+  return memberFilter;
+};
+
+const addMembershipDetails = async (members, { tenantId, businessId }) => {
+  if (!members.length) return [];
+
+  const memberships = await MemberMembership.find({
+    tenantId,
+    businessId,
+    memberId: { $in: members.map(member => member._id) },
+    status: { $in: ['Active', 'Expired'] }
+  })
+    .populate({
+      path: 'planId',
+      select: 'planName',
+      match: { tenantId, businessId }
+    })
+    .sort({ startDate: -1, createdAt: -1 })
+    .lean();
+
+  const latestMemberships = new Map();
+  for (const membership of memberships) {
+    const memberId = String(membership.memberId);
+    if (!latestMemberships.has(memberId)) latestMemberships.set(memberId, membership);
   }
 
-  const filterMatch = {
-    ...(filter === 'active' ? {
-      status: 'Active',
-      'membership._id': { $exists: true },
-      expiryCategory: { $ne: 'expired' }
-    } : {}),
-    ...(filter === 'expired' ? {
-      'membership._id': { $exists: true },
-      expiryCategory: 'expired'
-    } : {}),
-    ...(filter === 'expiringSoon' ? {
-      status: 'Active',
-      'membership._id': { $exists: true },
-      expiryCategory: { $in: ['today', 'expiringSoon'] }
-    } : {}),
-    ...(filter === 'pendingFees' ? { pendingAmount: { $gt: 0 } } : {})
-  };
+  const membershipIds = memberships.map(membership => membership._id);
+  const paymentTotals = membershipIds.length
+    ? await Payment.aggregate([
+        {
+          $match: {
+            tenantId,
+            businessId,
+            membershipId: { $in: membershipIds },
+            status: 'Success'
+          }
+        },
+        { $group: { _id: '$membershipId', paidAmount: { $sum: '$amount' } } }
+      ])
+    : [];
+  const paidByMembership = new Map(
+    paymentTotals.map(payment => [String(payment._id), Number(payment.paidAmount) || 0])
+  );
 
-  return { pipeline, filterMatch };
+  return members.map(member => {
+    const membership = latestMemberships.get(String(member._id)) || null;
+    const paidAmount = membership
+      ? paidByMembership.get(String(membership._id)) || 0
+      : 0;
+    const planPrice = Number(membership?.planPrice) || 0;
+    return {
+      _id: member._id,
+      fullName: member.fullName,
+      phone: member.phone,
+      status: member.status,
+      normalizedMobile: normalizeIndianMobile(member.phone),
+      membership,
+      planName: membership?.planId?.planName || '',
+      pendingAmount: Math.max(0, planPrice - paidAmount)
+    };
+  });
+};
+
+const loadMembersWithMembership = async ({ tenantId, businessId, search = '', memberIds }) => {
+  const memberFilter = buildMemberFilter({ tenantId, businessId, search, memberIds });
+  const members = await Member.find(memberFilter).sort({ createdAt: -1 }).lean();
+  return addMembershipDetails(members, { tenantId, businessId });
+};
+
+const getExpiryCategory = (membership, window) => {
+  if (!membership?.endDate) return 'active';
+  const endDate = new Date(membership.endDate);
+  const startDate = membership.startDate ? new Date(membership.startDate) : null;
+  if (endDate < window.todayStart) return 'expired';
+  if (
+    endDate < window.tomorrowStart &&
+    (!startDate || startDate < window.tomorrowStart)
+  ) return 'today';
+  if (
+    endDate >= window.tomorrowStart &&
+    endDate < window.next8DayStart &&
+    (!startDate || startDate < window.tomorrowStart)
+  ) return 'expiringSoon';
+  return 'active';
+};
+
+const matchesFilter = (member, filter, window) => {
+  const expiryCategory = getExpiryCategory(member.membership, window);
+  if (filter === 'active') {
+    return member.status === 'Active' && Boolean(member.membership) && expiryCategory !== 'expired';
+  }
+  if (filter === 'expired') {
+    return Boolean(member.membership) && expiryCategory === 'expired';
+  }
+  if (filter === 'expiringSoon') {
+    return member.status === 'Active' &&
+      Boolean(member.membership) &&
+      ['today', 'expiringSoon'].includes(expiryCategory);
+  }
+  if (filter === 'pendingFees') return member.pendingAmount > 0;
+  return true;
 };
 
 const getEligible = async (req, res) => {
@@ -266,56 +187,49 @@ const getEligible = async (req, res) => {
     const page = parsePage(req.query.page, 1, Number.MAX_SAFE_INTEGER);
     const limit = parsePage(req.query.limit, 50, 100);
     const window = await getTenantExpiryWindow(req.tenantId);
-    const { pipeline, filterMatch } = memberPipeline({
+    const memberFilter = buildMemberFilter({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
-      search,
-      filter,
-      window
+      search
     });
-    const aggregate = await Member.aggregate([
-      ...pipeline,
-      {
-        $facet: {
-          members: [
-            { $match: { normalizedMobile: { $ne: '' }, ...filterMatch } },
-            { $sort: { fullName: 1, _id: 1 } },
-            { $skip: (page - 1) * limit },
-            { $limit: limit },
-            {
-              $project: {
-                _id: 1,
-                fullName: 1,
-                phone: 1,
-                normalizedMobile: 1,
-                membership: 1,
-                planName: { $ifNull: ['$plan.planName', ''] },
-                pendingAmount: 1
-              }
-            }
-          ],
-          total: [
-            { $match: { normalizedMobile: { $ne: '' }, ...filterMatch } },
-            { $count: 'value' }
-          ],
-          invalid: [
-            { $match: { normalizedMobile: '', ...filterMatch } },
-            { $count: 'value' }
-          ]
+    const cursor = Member.find(memberFilter).sort({ createdAt: -1 }).lean().cursor();
+    const pageMembers = [];
+    let total = 0;
+    let invalidNumberCount = 0;
+    let batch = [];
+    const processBatch = async () => {
+      const enrichedMembers = await addMembershipDetails(batch, {
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId
+      });
+      for (const member of enrichedMembers) {
+        if (!matchesFilter(member, filter, window)) continue;
+        if (!member.normalizedMobile) {
+          invalidNumberCount += 1;
+          continue;
         }
+        if (total >= (page - 1) * limit && pageMembers.length < limit) {
+          pageMembers.push(member);
+        }
+        total += 1;
       }
-    ]);
-    const result = aggregate[0] || {};
+      batch = [];
+    };
+    for await (const member of cursor) {
+      batch.push(member);
+      if (batch.length === 500) await processBatch();
+    }
+    if (batch.length) await processBatch();
     return res.json({
       success: true,
-      members: result.members || [],
+      members: pageMembers,
       pagination: {
         page,
         limit,
-        total: result.total?.[0]?.value || 0,
-        totalPages: Math.ceil((result.total?.[0]?.value || 0) / limit)
+        total,
+        totalPages: Math.ceil(total / limit)
       },
-      invalidNumberCount: result.invalid?.[0]?.value || 0
+      invalidNumberCount
     });
   } catch (error) {
     logControllerError('member lookup', error, {
@@ -381,30 +295,13 @@ const createCampaign = async (req, res) => {
     if (uniqueIds.length !== memberIds.length) {
       return responseError(res, 400, 'Duplicate recipients are not allowed.');
     }
-    const window = await getTenantExpiryWindow(req.tenantId);
-    const { pipeline } = memberPipeline({
+    const members = await loadMembersWithMembership({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
-      search: '',
-      filter: 'all',
-      memberIds: uniqueIds.map(id => new mongoose.Types.ObjectId(id)),
-      window
+      memberIds: uniqueIds.map(id => new mongoose.Types.ObjectId(id))
     });
-    const members = await Member.aggregate([
-      ...pipeline,
-      { $match: { normalizedMobile: { $ne: '' } } },
-      {
-        $project: {
-          _id: 1,
-          fullName: 1,
-          normalizedMobile: 1,
-          'membership.endDate': 1,
-          pendingAmount: 1,
-          planName: { $ifNull: ['$plan.planName', ''] }
-        }
-      }
-    ]);
-    if (members.length !== uniqueIds.length) {
+    const eligibleMembers = members.filter(member => member.normalizedMobile);
+    if (eligibleMembers.length !== uniqueIds.length) {
       return responseError(res, 400, 'Some selected members are no longer available or do not have a valid mobile number. Refresh the list and try again.');
     }
     const recipientMobiles = new Set();
