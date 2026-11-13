@@ -47,6 +47,110 @@ describe('Attendance', () => {
     expect(component).toBeTruthy();
   });
 
+  it('rejects unsupported gallery image types without calling attendance API', async () => {
+    const file = new File(['not an image'], 'member.gif', { type: 'image/gif' });
+    const input = { files: [file], value: 'member.gif' } as unknown as HTMLInputElement;
+
+    await component.onQRImageSelected({ target: input } as unknown as Event);
+
+    expect(component.errorMessage).toBe('Please select a JPG, JPEG, PNG, or WebP image.');
+    expect(attendanceService.checkInWithQR).not.toHaveBeenCalled();
+    expect(input.value).toBe('');
+  });
+
+  it('sends a decoded gallery QR payload through the existing QR attendance API', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn().mockReturnValue('blob:member-qr')
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn()
+    });
+    const loadImage = vi.spyOn(component as any, 'loadQRImage')
+      .mockResolvedValue({} as HTMLImageElement);
+    const decodeImage = vi.spyOn(component as any, 'decodeQRImage')
+      .mockResolvedValue('existing-member-qr-payload');
+    attendanceService.checkInWithQR.mockReturnValue(of({
+      message: 'Attendance marked successfully',
+      member: { fullName: 'Test Member' }
+    }));
+    component.qrScannerOpen = true;
+    const file = new File(['image'], 'member.webp', { type: 'image/webp' });
+    const input = { files: [file], value: 'member.webp' } as unknown as HTMLInputElement;
+
+    try {
+      await component.onQRImageSelected({ target: input } as unknown as Event);
+
+      expect(loadImage).toHaveBeenCalledWith('blob:member-qr');
+      expect(decodeImage).toHaveBeenCalledOnce();
+      expect(attendanceService.checkInWithQR).toHaveBeenCalledWith('existing-member-qr-payload');
+      expect(component.successMessage).toContain('Attendance marked successfully');
+      expect(component.qrScannerOpen).toBe(false);
+    } finally {
+      loadImage.mockRestore();
+      decodeImage.mockRestore();
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectURL
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectURL
+      });
+    }
+  });
+
+  it('shows the no-QR message on decode failure and allows selecting another image', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn().mockReturnValue('blob:member-qr')
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn()
+    });
+    vi.spyOn(component as any, 'loadQRImage').mockResolvedValue({} as HTMLImageElement);
+    const decodeImage = vi.spyOn(component as any, 'decodeQRImage')
+      .mockRejectedValueOnce(new Error('No barcode found'))
+      .mockResolvedValueOnce('valid-member-payload');
+    attendanceService.checkInWithQR.mockReturnValue(of({
+      message: 'Attendance marked successfully',
+      member: { fullName: 'Test Member' }
+    }));
+    component.qrScannerOpen = true;
+    const selectFile = async () => {
+      const file = new File(['image'], 'member.png', { type: 'image/png' });
+      const input = { files: [file], value: 'member.png' } as unknown as HTMLInputElement;
+      await component.onQRImageSelected({ target: input } as unknown as Event);
+    };
+
+    try {
+      await selectFile();
+      expect(component.errorMessage)
+        .toBe('No valid member QR code found. Please select another image.');
+      expect(attendanceService.checkInWithQR).not.toHaveBeenCalled();
+
+      await selectFile();
+      expect(decodeImage).toHaveBeenCalledTimes(2);
+      expect(attendanceService.checkInWithQR).toHaveBeenCalledWith('valid-member-payload');
+    } finally {
+      vi.restoreAllMocks();
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectURL
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectURL
+      });
+    }
+  });
+
   it('exports every attendance record for the selected date, including QR source labels', async () => {
     const records = [
       {

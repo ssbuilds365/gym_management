@@ -21,6 +21,8 @@ import { jsPDF } from 'jspdf';
 import { environment } from '../../../environments/environment';
 import { Observable, finalize, map } from 'rxjs';
 
+class QRImageLoadError extends Error {}
+
 @Component({
   selector: 'app-attendance',
   standalone: true,
@@ -32,6 +34,8 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   @ViewChild('qrVideo')
   qrVideo!: ElementRef<HTMLVideoElement>;
+  @ViewChild('qrImageInput')
+  qrImageInput!: ElementRef<HTMLInputElement>;
   @Input() active = false;
 
   members: any[] = [];
@@ -57,11 +61,20 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   qrScannerOpen = false;
   qrScanning = false;
   qrProcessing = false;
+  qrImageScanning = false;
+  qrImagePreviewUrl = '';
 
   private codeReader?: BrowserMultiFormatReader;
   private scannerControls?: IScannerControls;
   private scanLocked = false;
   private scannerStartToken = 0;
+  private galleryScanToken = 0;
+  private readonly maxQRImageSize = 10 * 1024 * 1024;
+  private readonly supportedQRImageTypes = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ]);
 
   constructor(
     private attendanceService: AttendanceService,
@@ -94,6 +107,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   ngOnDestroy(): void {
     this.stopQRScanner();
+    this.clearQRImagePreview();
   }
 
   // Get today's local date
@@ -242,7 +256,109 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
     this.successMessage = '';
     this.errorMessage = '';
     this.scanLocked = false;
+    this.galleryScanToken++;
+    this.qrImageScanning = false;
+    this.clearQRImagePreview();
     this.qrScannerOpen = true;
+  }
+
+  openQRImagePicker(): void {
+    if (this.qrProcessing || this.qrImageScanning) return;
+    this.errorMessage = '';
+    this.stopQRScanner();
+    const input = this.qrImageInput?.nativeElement;
+    if (!input) {
+      this.errorMessage = 'Image picker is not ready. Please try again.';
+      return;
+    }
+    input.value = '';
+    input.click();
+  }
+
+  async onQRImageSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const mimeType = file.type.toLowerCase();
+    const supportedByExtension = ['jpg', 'jpeg'].includes(extension || '')
+      ? 'image/jpeg'
+      : extension === 'png'
+        ? 'image/png'
+        : extension === 'webp'
+          ? 'image/webp'
+          : '';
+    if (
+      (mimeType && !this.supportedQRImageTypes.has(mimeType)) ||
+      (!mimeType && !supportedByExtension) ||
+      (mimeType && supportedByExtension && mimeType !== supportedByExtension)
+    ) {
+      this.errorMessage = 'Please select a JPG, JPEG, PNG, or WebP image.';
+      return;
+    }
+    if (!file.size || file.size > this.maxQRImageSize) {
+      this.errorMessage = file.size
+        ? 'Image must be 10 MB or smaller.'
+        : 'The selected image is empty. Please choose another image.';
+      return;
+    }
+
+    this.stopQRScanner();
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.scanLocked = false;
+    const scanToken = ++this.galleryScanToken;
+    this.clearQRImagePreview();
+    this.qrImagePreviewUrl = URL.createObjectURL(file);
+    this.qrImageScanning = true;
+    this.changeDetector.markForCheck();
+
+    try {
+      const image = await this.loadQRImage(this.qrImagePreviewUrl);
+      if (scanToken !== this.galleryScanToken || !this.qrScannerOpen) return;
+      const qrToken = await this.decodeQRImage(image);
+      if (scanToken !== this.galleryScanToken || !this.qrScannerOpen) return;
+      if (!qrToken) {
+        this.errorMessage = 'No valid member QR code found. Please select another image.';
+        return;
+      }
+
+      this.scanLocked = true;
+      this.submitQRAttendance(qrToken);
+    } catch (error) {
+      if (scanToken === this.galleryScanToken && this.qrScannerOpen) {
+        console.warn('Unable to decode selected attendance QR image:', error);
+        this.errorMessage = error instanceof QRImageLoadError
+          ? 'Unable to read this image. Please select a valid JPG, JPEG, PNG, or WebP image.'
+          : 'No valid member QR code found. Please select another image.';
+      }
+    } finally {
+      if (scanToken === this.galleryScanToken) this.qrImageScanning = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  private async decodeQRImage(image: HTMLImageElement): Promise<string> {
+    const { BrowserMultiFormatReader } = await import('@zxing/browser');
+    this.codeReader ??= new BrowserMultiFormatReader();
+    return (await this.codeReader.decodeFromImageElement(image)).getText().trim();
+  }
+
+  private loadQRImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new QRImageLoadError());
+      image.src = url;
+    });
+  }
+
+  private clearQRImagePreview(): void {
+    if (!this.qrImagePreviewUrl) return;
+    URL.revokeObjectURL(this.qrImagePreviewUrl);
+    this.qrImagePreviewUrl = '';
   }
 
   // Start camera scanner
@@ -257,6 +373,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
       }
 
       this.errorMessage = '';
+      this.clearQRImagePreview();
       this.qrScanning = true;
       this.changeDetector.markForCheck();
 
@@ -312,6 +429,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
         this.qrScannerOpen = false;
         this.scanLocked = false;
+        this.clearQRImagePreview();
 
         this.loadDailyAttendance();
       },
@@ -338,9 +456,12 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   // Close scanner
   closeQRScanner(): void {
     this.stopQRScanner();
+    this.galleryScanToken++;
     this.qrScannerOpen = false;
     this.scanLocked = false;
     this.qrProcessing = false;
+    this.qrImageScanning = false;
+    this.clearQRImagePreview();
   }
 
   // Change attendance date

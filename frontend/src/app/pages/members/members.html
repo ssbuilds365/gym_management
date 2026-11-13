@@ -116,6 +116,7 @@
                                 aria-label="Select all members on this page" />
                         </th>
                         <th>MEMBER</th>
+                        <th>MEMBER ID</th>
                         <th>PHONE</th>
                         <th>EMAIL</th>
                         <th>PLAN</th>
@@ -142,6 +143,10 @@
                                 </div>
                                 <strong>{{ member.fullName }}</strong>
                             </div>
+                        </td>
+
+                        <td class="member-id">
+                            {{ member._id?.slice(-6).toUpperCase() || '—' }}
                         </td>
 
                         <td>{{ member.phone }}</td>
@@ -215,7 +220,7 @@
                     </tr>
 
                     <tr *ngIf="!loading && members.length === 0">
-                        <td colspan="10" class="empty-state">
+                        <td colspan="11" class="empty-state">
                             No members found. Add your first member!
                         </td>
                     </tr>

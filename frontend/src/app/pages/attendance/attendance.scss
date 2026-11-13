@@ -412,6 +412,14 @@ table {
     object-fit: cover;
     display: block;
   }
+
+  .qr-image-preview {
+    display: block;
+    width: 100%;
+    height: 260px;
+    object-fit: contain;
+    background: #171717;
+  }
 }
 
 .scanner-status {
@@ -447,12 +455,26 @@ table {
   }
 }
 
+.qr-image-input {
+  display: none;
+}
+
 .start-scanner-btn {
   background: #d92332;
   color: white;
 
   &:hover {
     background: #b91c2a;
+  }
+}
+
+.gallery-scanner-btn {
+  background: #fff;
+  color: #d92332;
+  border: 1px solid #d92332 !important;
+
+  &:hover {
+    background: #fff0f0;
   }
 }
 
@@ -511,6 +533,19 @@ table {
 
     video {
       height: 230px;
+    }
+
+    .qr-image-preview {
+      height: 230px;
+    }
+  }
+
+  .scanner-actions {
+    gap: 8px;
+
+    button {
+      flex: 1 1 42%;
+      padding: 11px 10px;
     }
   }
 }

@@ -28,9 +28,10 @@ describe('Members', () => {
   };
 
   const member = {
-    _id: 'member-123',
+    _id: 'member-123-b3d3bc',
     fullName: 'Test Member',
-    phone: '1234567890'
+    phone: '1234567890',
+    status: 'Active'
   };
 
   beforeEach(async () => {
@@ -83,6 +84,19 @@ describe('Members', () => {
 
     expect(planService.getMemberMemberships).toHaveBeenCalledTimes(1);
     expect(component.membershipHistory).toEqual(records);
+  });
+
+  it('shows the same six-character member ID format as Dashboard Recent Members', () => {
+    component.members = [member];
+    fixture.detectChanges();
+
+    const table = fixture.nativeElement.querySelector('.table-responsive table') as HTMLTableElement;
+    const headers = Array.from(table.querySelectorAll('thead th'))
+      .map(header => header.textContent?.trim());
+    const row = table.querySelector('tbody tr') as HTMLTableRowElement;
+
+    expect(headers.indexOf('MEMBER ID')).toBe(headers.indexOf('MEMBER') + 1);
+    expect(row.cells[2].textContent?.trim()).toBe('B3D3BC');
   });
 
   it('submits enquiry conversion through the backend flow without creating a duplicate member', () => {

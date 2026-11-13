@@ -281,6 +281,11 @@ table {
   gap: 10px;
 }
 
+.member-id {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .avatar {
   background: #3a151a;
   color: #ff6670;

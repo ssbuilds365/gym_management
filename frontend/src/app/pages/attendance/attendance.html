@@ -93,8 +93,15 @@
 
       <div class="qr-camera-container">
 
+        <img
+          *ngIf="qrImagePreviewUrl"
+          class="qr-image-preview"
+          [src]="qrImagePreviewUrl"
+          alt="Selected QR code image preview"
+        />
         <video
           #qrVideo
+          [style.display]="qrImagePreviewUrl ? 'none' : 'block'"
           autoplay
           muted
           playsinline
@@ -104,6 +111,10 @@
 
       <div class="scanner-status" *ngIf="qrScanning">
         Camera active. Scan the member QR code.
+      </div>
+
+      <div class="scanner-status" *ngIf="qrImageScanning" role="status">
+        Scanning selected image...
       </div>
 
       <div class="scanner-status" *ngIf="qrProcessing">
@@ -119,7 +130,7 @@
         <button
           type="button"
           class="start-scanner-btn"
-          *ngIf="!qrScanning && !qrProcessing"
+          *ngIf="!qrScanning && !qrProcessing && !qrImageScanning"
           (click)="startQRScanner()"
         >
           Start Camera
@@ -132,6 +143,25 @@
           (click)="stopQRScanner()"
         >
           Stop Camera
+        </button>
+
+        <input
+          #qrImageInput
+          class="qr-image-input"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+          (change)="onQRImageSelected($event)"
+          tabindex="-1"
+          aria-hidden="true"
+        />
+
+        <button
+          type="button"
+          class="gallery-scanner-btn"
+          *ngIf="!qrProcessing && !qrImageScanning"
+          (click)="openQRImagePicker()"
+        >
+          {{ qrImagePreviewUrl ? 'Choose Another Image' : 'Choose from Gallery' }}
         </button>
 
         <button
