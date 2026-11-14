@@ -42,6 +42,14 @@ export class ManagementService {
     return this.http.get(`${this.baseUrl}/trainers-staff/${id}/assignments`);
   }
 
+  searchAssignableMembers(search: string, page = 1, limit = 20): Observable<any> {
+    const params = new HttpParams()
+      .set('search', search)
+      .set('page', page)
+      .set('limit', limit);
+    return this.http.get(`${this.baseUrl}/trainers-staff/members/search`, { params });
+  }
+
   assignMemberToTrainer(
     id: string,
     memberId: string,

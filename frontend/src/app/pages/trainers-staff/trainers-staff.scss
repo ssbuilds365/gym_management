@@ -77,6 +77,18 @@ th { color: #777; font-weight: 700; white-space: nowrap; }
 .status.failed { background: #fff0ef; color: #b42318; }
 .assignment-form { align-items: end; margin: 18px 0; }
 .assignment-form label { flex: 1; }
+.assignment-member-picker { position: relative; flex: 2 1 280px; min-width: 0; }
+.assignment-member-trigger { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 11px; border: 1px solid #ddd; border-radius: 7px; background: #fff; color: #222; text-align: left; cursor: pointer; }
+.assignment-member-trigger > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assignment-member-dropdown { margin-top: 6px; padding: 9px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px #00000012; }
+.assignment-member-dropdown > input { margin-bottom: 7px; }
+.assignment-member-options { max-height: 210px; overflow-y: auto; overscroll-behavior: contain; }
+.assignment-member-option { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 9px; border: 0; border-radius: 6px; background: #fff; color: #222; text-align: left; cursor: pointer; }
+.assignment-member-option:hover, .assignment-member-option[aria-selected="true"] { background: #fff0ef; }
+.assignment-member-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assignment-member-option span { color: #777; font-size: 11px; }
+.assignment-member-option span:last-child { grid-column: 1 / -1; }
+.assignment-member-message { margin: 0; padding: 10px 6px; color: #777; font-size: 12px; }
 .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
 .detail-grid dt { color: #777; }.detail-grid dd { margin: 0; }
 @media (max-width: 850px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

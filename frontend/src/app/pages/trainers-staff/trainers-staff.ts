@@ -12,7 +12,6 @@ import { FormsModule } from '@angular/forms';
 import { finalize, Subscription } from 'rxjs';
 import { jsPDF } from 'jspdf';
 import { ManagementService } from '../../services/management';
-import { MemberService } from '../../services/member';
 
 interface TeamRecord {
   _id: string;
@@ -151,8 +150,23 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     status: string;
     assignmentRole?: 'Primary' | 'Additional';
   }> = [];
-  availableMembers: Array<{ _id: string; fullName: string; phone: string }> = [];
+  availableMembers: Array<{
+    _id: string;
+    fullName: string;
+    phone: string;
+    memberId: string;
+  }> = [];
   selectedMemberId = '';
+  selectedAssignmentMember: { _id: string; fullName: string; phone: string; memberId: string } | null = null;
+  assignmentMemberSearchOpen = false;
+  assignmentMemberSearch = '';
+  assignmentMemberLoading = false;
+  assignmentMemberHasMore = false;
+  assignmentMemberError = '';
+  assignmentMemberActiveIndex = 0;
+  private assignmentMemberPage = 1;
+  private assignmentMemberSearchTimer?: ReturnType<typeof setTimeout>;
+  private assignmentMemberRequest?: Subscription;
   assignmentRole: 'Primary' | 'Additional' = 'Primary';
   assignmentTrainingType: 'General' | 'Personal Training' = 'General';
   ptTrainer: TeamRecord | null = null;
@@ -203,7 +217,6 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
 
   constructor(
     private readonly management: ManagementService,
-    private readonly members: MemberService,
     private readonly changeDetector: ChangeDetectorRef
   ) {}
 
@@ -223,6 +236,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.clearSearchTimer('Trainer');
     this.clearSearchTimer('Staff');
+    this.clearAssignmentMemberSearch();
     this.trainerRequest?.unsubscribe();
     this.staffRequest?.unsubscribe();
     this.financialRequest?.unsubscribe();
@@ -584,8 +598,16 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   }
 
   openAssignments(trainer: TeamRecord): void {
+    this.clearAssignmentMemberSearch();
     this.assignmentTrainer = trainer;
     this.assignmentLoading = true;
+    this.assignmentMemberSearchOpen = false;
+    this.assignmentMemberSearch = '';
+    this.assignmentMemberError = '';
+    this.assignmentMemberHasMore = false;
+    this.availableMembers = [];
+    this.selectedMemberId = '';
+    this.selectedAssignmentMember = null;
     this.errorMessage = '';
     this.management.getTrainerAssignments(trainer._id)
       .pipe(finalize(() => {
@@ -600,19 +622,116 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
           this.assignmentTrainer = null;
         }
       });
-    this.members.getAllMatchingMembers('', 'Active')
-      .pipe(finalize(() => this.changeDetector.markForCheck()))
+  }
+
+  openAssignmentMemberSearch(): void {
+    if (this.assignmentMemberSearchOpen) {
+      this.assignmentMemberSearchOpen = false;
+      return;
+    }
+    this.assignmentMemberSearchOpen = true;
+    this.assignmentMemberSearch = '';
+    this.assignmentMemberError = '';
+    this.assignmentMemberPage = 1;
+    this.availableMembers = [];
+    this.requestAssignableMembers(1, false);
+  }
+
+  onAssignmentMemberSearch(value: string): void {
+    this.assignmentMemberSearch = value;
+    this.assignmentMemberActiveIndex = 0;
+    this.assignmentMemberPage = 1;
+    this.assignmentMemberHasMore = false;
+    this.availableMembers = [];
+    this.assignmentMemberError = '';
+    this.assignmentMemberRequest?.unsubscribe();
+    if (this.assignmentMemberSearchTimer) clearTimeout(this.assignmentMemberSearchTimer);
+    this.assignmentMemberSearchTimer = setTimeout(() => {
+      this.assignmentMemberSearchTimer = undefined;
+      this.requestAssignableMembers(1, false);
+    }, 250);
+  }
+
+  private requestAssignableMembers(page: number, append: boolean): void {
+    this.assignmentMemberRequest?.unsubscribe();
+    this.assignmentMemberLoading = true;
+    this.assignmentMemberError = '';
+    this.assignmentMemberRequest = this.management
+      .searchAssignableMembers(this.assignmentMemberSearch.trim(), page, 20)
+      .pipe(finalize(() => {
+        this.assignmentMemberLoading = false;
+        this.changeDetector.markForCheck();
+      }))
       .subscribe({
-      next: members => this.availableMembers = members.map(member => ({
-        _id: member._id,
-        fullName: member.fullName,
-        phone: member.phone
-      })),
-      error: error => {
-        console.error('Assignment member list error:', error);
-        this.errorMessage = error.error?.message || 'Unable to load members for assignment.';
-      }
-    });
+        next: response => {
+          const members = response.members || [];
+          this.availableMembers = append
+            ? [...this.availableMembers, ...members]
+            : members;
+          this.assignmentMemberPage = page;
+          this.assignmentMemberHasMore = Boolean(response.pagination?.hasMore);
+          this.assignmentMemberActiveIndex = 0;
+        },
+        error: error => {
+          console.error('Assignable member search error:', error);
+          this.assignmentMemberError =
+            error.error?.message || 'Unable to search active members. Please try again.';
+        }
+      });
+  }
+
+  loadMoreAssignableMembers(event: Event): void {
+    const element = event.target as HTMLElement;
+    if (
+      element.scrollTop + element.clientHeight >= element.scrollHeight - 40 &&
+      this.assignmentMemberHasMore &&
+      !this.assignmentMemberLoading
+    ) {
+      this.requestAssignableMembers(this.assignmentMemberPage + 1, true);
+    }
+  }
+
+  onAssignmentMemberKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.assignmentMemberSearchOpen = false;
+      return;
+    }
+    if (event.key === 'ArrowDown' && this.availableMembers.length) {
+      event.preventDefault();
+      this.assignmentMemberActiveIndex =
+        (this.assignmentMemberActiveIndex + 1) % this.availableMembers.length;
+      return;
+    }
+    if (event.key === 'ArrowUp' && this.availableMembers.length) {
+      event.preventDefault();
+      this.assignmentMemberActiveIndex =
+        (this.assignmentMemberActiveIndex - 1 + this.availableMembers.length) %
+        this.availableMembers.length;
+      return;
+    }
+    if (event.key === 'Enter' && this.availableMembers[this.assignmentMemberActiveIndex]) {
+      event.preventDefault();
+      this.selectAssignmentMember(this.availableMembers[this.assignmentMemberActiveIndex]);
+    }
+  }
+
+  selectAssignmentMember(member: {
+    _id: string;
+    fullName: string;
+    phone: string;
+    memberId: string;
+  }): void {
+    this.selectedMemberId = member._id;
+    this.selectedAssignmentMember = member;
+    this.assignmentMemberSearchOpen = false;
+    this.assignmentMemberError = '';
+  }
+
+  private clearAssignmentMemberSearch(): void {
+    if (this.assignmentMemberSearchTimer) clearTimeout(this.assignmentMemberSearchTimer);
+    this.assignmentMemberSearchTimer = undefined;
+    this.assignmentMemberRequest?.unsubscribe();
   }
 
   assignMember(capacityOverrideConfirmed = false): void {
@@ -634,6 +753,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
       .subscribe({
         next: () => {
           this.selectedMemberId = '';
+          this.selectedAssignmentMember = null;
           this.successMessage = 'Member assigned to trainer.';
           this.openAssignments(this.assignmentTrainer!);
           this.loadDirectory('Trainer');
@@ -675,9 +795,13 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   }
 
   closeAssignments(): void {
+    this.clearAssignmentMemberSearch();
     this.assignmentTrainer = null;
     this.assignedMembers = [];
     this.selectedMemberId = '';
+    this.selectedAssignmentMember = null;
+    this.assignmentMemberSearchOpen = false;
+    this.availableMembers = [];
   }
 
   openPTPackages(trainer: TeamRecord): void {
@@ -687,21 +811,6 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     this.ptError = '';
     this.ptSuccess = '';
     this.loadPTPackages();
-    this.management.getTrainerAssignments(trainer._id)
-      .pipe(finalize(() => this.changeDetector.markForCheck()))
-      .subscribe({
-        next: response => {
-          this.availableMembers = (response.members || []).map((member: { _id: string; fullName: string; phone: string }) => ({
-            _id: member._id,
-            fullName: member.fullName,
-            phone: member.phone
-          }));
-        },
-        error: error => {
-          console.error('PT package member list error:', error);
-          this.ptError = error.error?.message || 'Unable to load members for PT packages.';
-        }
-      });
   }
 
   loadPTPackages(): void {

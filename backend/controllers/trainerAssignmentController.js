@@ -18,6 +18,68 @@ const assignmentError = (res, error, fallback) => {
   return res.status(500).json({ success: false, message: fallback });
 };
 
+exports.searchAssignableMembers = async (req, res) => {
+  try {
+    const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : '';
+    const pageValue = Number.parseInt(req.query.page, 10);
+    const limitValue = Number.parseInt(req.query.limit, 10);
+    const page = Number.isInteger(pageValue) && pageValue > 0
+      ? Math.min(pageValue, 10000)
+      : 1;
+    const limit = Number.isInteger(limitValue) && limitValue > 0
+      ? Math.min(limitValue, 20)
+      : 20;
+    const filter = {
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      deletedAt: null,
+      status: 'Active'
+    };
+
+    if (rawSearch) {
+      const safeSearch = rawSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchConditions = [
+        { fullName: { $regex: safeSearch, $options: 'i' } },
+        { phone: { $regex: safeSearch, $options: 'i' } }
+      ];
+      if (/^[a-f\d]{1,6}$/i.test(rawSearch)) {
+        searchConditions.push({
+          $expr: {
+            $regexMatch: {
+              input: { $substrBytes: [{ $toString: '$_id' }, 18, 6] },
+              regex: safeSearch,
+              options: 'i'
+            }
+          }
+        });
+      }
+      filter.$or = searchConditions;
+    }
+
+    const members = await Member.find(filter)
+      .select('_id fullName phone')
+      .sort({ fullName: 1, _id: 1 })
+      .skip((page - 1) * limit)
+      .limit(limit + 1)
+      .lean();
+    const hasMore = members.length > limit;
+    const results = members.slice(0, limit).map(member => ({
+      _id: member._id,
+      fullName: member.fullName,
+      phone: member.phone,
+      memberId: String(member._id).slice(-6).toUpperCase()
+    }));
+
+    return res.json({
+      success: true,
+      members: results,
+      pagination: { page, limit, hasMore }
+    });
+  } catch (error) {
+    return assignmentError(res, error, 'Unable to search active members');
+  }
+};
+
 exports.getTrainerAssignments = async (req, res) => {
   try {
     if (!validId(req.params.id)) {

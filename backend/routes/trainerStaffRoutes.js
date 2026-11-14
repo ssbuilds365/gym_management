@@ -8,6 +8,7 @@ const {
   getTrainerStaffReport
 } = require('../controllers/trainerStaffController');
 const {
+  searchAssignableMembers,
   getTrainerAssignments,
   assignMemberToTrainer,
   removeTrainerAssignment
@@ -26,6 +27,7 @@ router.get('/', listTrainerStaff);
 router.post('/', createTrainerStaff);
 router.get('/financial-performance', trainerFinancialPerformance);
 router.get('/reports', getTrainerStaffReport);
+router.get('/members/search', searchAssignableMembers);
 router.post('/pt-payments/:paymentId/refunds', refundTrainerPTPayment);
 router.post('/pt-packages/:packageId/payments', recordTrainerPTPayment);
 router.get('/:id/assignments', getTrainerAssignments);

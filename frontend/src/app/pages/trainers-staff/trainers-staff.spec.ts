@@ -3,7 +3,6 @@ import { of } from 'rxjs';
 import { vi } from 'vitest';
 import { TrainersStaff } from './trainers-staff';
 import { ManagementService } from '../../services/management';
-import { MemberService } from '../../services/member';
 
 describe('TrainersStaff', () => {
   let fixture: ComponentFixture<TrainersStaff>;
@@ -14,6 +13,9 @@ describe('TrainersStaff', () => {
     getTrainerStaffReport: ReturnType<typeof vi.fn>;
     createStaff: ReturnType<typeof vi.fn>;
     updateStaff: ReturnType<typeof vi.fn>;
+    getTrainerAssignments: ReturnType<typeof vi.fn>;
+    searchAssignableMembers: ReturnType<typeof vi.fn>;
+    assignMemberToTrainer: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
@@ -55,14 +57,19 @@ describe('TrainersStaff', () => {
         }
       })),
       createStaff: vi.fn().mockReturnValue(of({ success: true })),
-      updateStaff: vi.fn().mockReturnValue(of({ success: true }))
+      updateStaff: vi.fn().mockReturnValue(of({ success: true })),
+      getTrainerAssignments: vi.fn().mockReturnValue(of({ members: [] })),
+      searchAssignableMembers: vi.fn().mockReturnValue(of({
+        members: [],
+        pagination: { hasMore: false }
+      })),
+      assignMemberToTrainer: vi.fn().mockReturnValue(of({ success: true }))
     };
 
     await TestBed.configureTestingModule({
       imports: [TrainersStaff],
       providers: [
-        { provide: ManagementService, useValue: management },
-        { provide: MemberService, useValue: { getAllMatchingMembers: vi.fn().mockReturnValue(of([])) } }
+        { provide: ManagementService, useValue: management }
       ]
     }).compileComponents();
 
@@ -85,6 +92,111 @@ describe('TrainersStaff', () => {
     expect(component.activeTrainerTotal).toBe(2);
     expect(component.staffTotal).toBe(4);
     expect(component.activeStaffTotal).toBe(3);
+  });
+
+  it('searches active assignment candidates on demand and displays the existing short member ID', () => {
+    management.searchAssignableMembers.mockReturnValue(of({
+      members: [{
+        _id: 'member-1',
+        fullName: 'Santosh',
+        memberId: 'B3D3BC',
+        phone: '9833788644'
+      }],
+      pagination: { hasMore: false }
+    }));
+
+    component.openAssignmentMemberSearch();
+    fixture.detectChanges();
+
+    expect(management.searchAssignableMembers).toHaveBeenCalledWith('', 1, 20);
+    expect(component.availableMembers[0].memberId).toBe('B3D3BC');
+    component.selectAssignmentMember(component.availableMembers[0]);
+    expect(component.selectedMemberId).toBe('member-1');
+    expect(component.selectedAssignmentMember?.memberId).toBe('B3D3BC');
+    expect(component.assignmentMemberSearchOpen).toBe(false);
+  });
+
+  it('debounces assignment member search and loads the next result page on scroll', async () => {
+    management.searchAssignableMembers
+      .mockReturnValueOnce(of({
+        members: [],
+        pagination: { hasMore: true }
+      }))
+      .mockReturnValueOnce(of({
+        members: [{
+          _id: 'member-1',
+          fullName: 'Santosh',
+          memberId: 'B3D3BC',
+          phone: '9833788644'
+        }],
+        pagination: { hasMore: true }
+      }))
+      .mockReturnValueOnce(of({
+        members: [{
+          _id: 'member-2',
+          fullName: 'Praveen',
+          memberId: 'B3D3AE',
+          phone: '8767236521'
+        }],
+        pagination: { hasMore: false }
+      }));
+
+    component.openAssignmentMemberSearch();
+    component.onAssignmentMemberSearch('983');
+    component.onAssignmentMemberSearch('9833');
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(management.searchAssignableMembers).toHaveBeenCalledTimes(2);
+    expect(management.searchAssignableMembers).toHaveBeenLastCalledWith('9833', 1, 20);
+    component.loadMoreAssignableMembers({
+      target: { scrollTop: 90, clientHeight: 100, scrollHeight: 200 }
+    } as unknown as Event);
+
+    expect(management.searchAssignableMembers).toHaveBeenLastCalledWith('9833', 2, 20);
+    expect(component.availableMembers.map(member => member.fullName))
+      .toEqual(['Santosh', 'Praveen']);
+  });
+
+  it('keeps the existing assignment role and training type when selecting a searchable result', () => {
+    component.assignmentRole = 'Additional';
+    component.assignmentTrainingType = 'Personal Training';
+    component.selectAssignmentMember({
+      _id: 'member-2',
+      fullName: 'Praveen',
+      memberId: 'B3D3AE',
+      phone: '8767236521'
+    });
+
+    expect(component.assignmentRole).toBe('Additional');
+    expect(component.assignmentTrainingType).toBe('Personal Training');
+  });
+
+  it('submits the selected member through the existing trainer assignment API', () => {
+    component.assignmentTrainer = {
+      _id: 'trainer-1',
+      name: 'Alex Trainer',
+      phone: '',
+      email: '',
+      role: 'Trainer',
+      status: 'Active'
+    };
+    component.selectAssignmentMember({
+      _id: 'member-3',
+      fullName: 'Aditi',
+      memberId: 'B3D3AC',
+      phone: '9930364525'
+    });
+
+    component.assignMember();
+
+    expect(management.assignMemberToTrainer).toHaveBeenCalledWith(
+      'trainer-1',
+      'member-3',
+      'Primary',
+      'General',
+      false
+    );
+    expect(component.selectedMemberId).toBe('');
   });
 
   it('shows PT financial figures without gym membership attribution', () => {

@@ -279,12 +279,69 @@
       <div class="section-heading"><div><span class="eyebrow">TRAINER ASSIGNMENTS</span><h3>{{ assignmentTrainer.name }}</h3></div><button class="secondary-btn" type="button" (click)="closeAssignments()">Close</button></div>
       <p class="muted" *ngIf="assignmentTrainer.status !== 'Active'">This trainer is inactive. Reactivate them before assigning members.</p>
       <form class="assignment-form" (ngSubmit)="assignMember()" *ngIf="assignmentTrainer.status === 'Active'">
-        <label>Assign or change a member
-          <select name="memberAssignment" [(ngModel)]="selectedMemberId" required>
-            <option value="">Select an active member</option>
-            <option *ngFor="let member of availableMembers" [value]="member._id">{{ member.fullName }} · {{ member.phone }}</option>
-          </select>
-        </label>
+        <div class="assignment-member-picker">
+          <label for="assignment-member-trigger">Assign or change a member</label>
+          <button
+            id="assignment-member-trigger"
+            class="assignment-member-trigger"
+            type="button"
+            [attr.aria-expanded]="assignmentMemberSearchOpen"
+            aria-haspopup="listbox"
+            (click)="openAssignmentMemberSearch()"
+          >
+            <span *ngIf="selectedAssignmentMember; else memberPlaceholder">
+              {{ selectedAssignmentMember.fullName }} · {{ selectedAssignmentMember.memberId }} · {{ selectedAssignmentMember.phone }}
+            </span>
+            <ng-template #memberPlaceholder>Select an active member</ng-template>
+            <span aria-hidden="true">⌄</span>
+          </button>
+          <div class="assignment-member-dropdown" *ngIf="assignmentMemberSearchOpen">
+            <input
+              #assignmentMemberSearchInput
+              type="search"
+              name="assignmentMemberSearch"
+              [ngModel]="assignmentMemberSearch"
+              (ngModelChange)="onAssignmentMemberSearch($event)"
+              (keydown)="onAssignmentMemberKeydown($event)"
+              [attr.aria-activedescendant]="availableMembers.length ? 'assignment-member-option-' + assignmentMemberActiveIndex : null"
+              aria-controls="assignment-member-options"
+              aria-autocomplete="list"
+              placeholder="Search by name, phone number or member ID..."
+              autocomplete="off"
+            />
+            <div
+              id="assignment-member-options"
+              class="assignment-member-options"
+              role="listbox"
+              aria-label="Matching active members"
+              (scroll)="loadMoreAssignableMembers($event)"
+            >
+              <button
+                *ngFor="let member of availableMembers; let i = index"
+                [id]="'assignment-member-option-' + i"
+                class="assignment-member-option"
+                type="button"
+                role="option"
+                [attr.aria-selected]="i === assignmentMemberActiveIndex"
+                (mouseenter)="assignmentMemberActiveIndex = i"
+                (click)="selectAssignmentMember(member)"
+              >
+                <strong>{{ member.fullName }}</strong>
+                <span>{{ member.memberId }}</span>
+                <span>{{ member.phone }}</span>
+              </button>
+              <p class="assignment-member-message" *ngIf="assignmentMemberLoading" role="status">
+                {{ availableMembers.length ? 'Loading more members…' : 'Searching members…' }}
+              </p>
+              <p class="assignment-member-message error-message" *ngIf="assignmentMemberError" role="alert">
+                {{ assignmentMemberError }}
+              </p>
+              <p class="assignment-member-message" *ngIf="!assignmentMemberLoading && !assignmentMemberError && !availableMembers.length">
+                No members found
+              </p>
+            </div>
+          </div>
+        </div>
         <label>Assignment role
           <select name="assignmentRole" [(ngModel)]="assignmentRole">
             <option value="Primary">Primary trainer</option>
