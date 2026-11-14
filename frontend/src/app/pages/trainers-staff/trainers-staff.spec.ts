@@ -94,6 +94,10 @@ describe('TrainersStaff', () => {
     expect(component.activeStaffTotal).toBe(3);
   });
 
+  it('loads trainer financial performance only once during initialization', () => {
+    expect(management.getTrainerFinancialPerformance).toHaveBeenCalledTimes(1);
+  });
+
   it('searches active assignment candidates on demand and displays the existing short member ID', () => {
     management.searchAssignableMembers.mockReturnValue(of({
       members: [{

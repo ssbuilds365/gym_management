@@ -1,31 +1,28 @@
 
 import { Routes } from '@angular/router';
 
-import { Register } from './pages/auth/register/register';
-import { Login } from './pages/auth/login/login';
-import { ForgotPassword } from './pages/auth/forgot-password/forgot-password';
-import { ResetPassword } from './pages/auth/reset-password/reset-password';
-
 export const routes: Routes = [
 
   {
     path: 'register',
-    component: Register
+    loadComponent: () => import('./pages/auth/register/register').then(module => module.Register)
   },
 
   {
     path: 'login',
-    component: Login
+    loadComponent: () => import('./pages/auth/login/login').then(module => module.Login)
   },
 
   {
     path: 'forgot-password',
-    component: ForgotPassword
+    loadComponent: () => import('./pages/auth/forgot-password/forgot-password')
+      .then(module => module.ForgotPassword)
   },
 
   {
     path: 'reset-password',
-    component: ResetPassword
+    loadComponent: () => import('./pages/auth/reset-password/reset-password')
+      .then(module => module.ResetPassword)
   },
 
   // Dashboard is rendered inside the App shell

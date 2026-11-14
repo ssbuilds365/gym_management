@@ -223,7 +223,6 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   ngOnInit(): void {
     this.load();
     this.loadReport();
-    this.loadFinancialPerformance();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
