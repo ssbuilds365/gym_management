@@ -8,9 +8,151 @@
             <p>Manage your gym members and their information.</p>
         </div>
 
-        <button class="add-btn" (click)="openAddForm()">
-            <span>＋</span> Add New Member
-        </button>
+        <!-- Bulk Member Import -->
+        <div class="modal-overlay" *ngIf="showImportModal">
+          <div class="modal-container member-import-modal">
+            <div class="modal-header">
+              <div>
+                <span class="eyebrow">BULK MEMBER IMPORT</span>
+                <h2>Import Members</h2>
+              </div>
+              <button type="button" class="close-btn" (click)="closeMemberImport()" [disabled]="importing">&times;</button>
+            </div>
+
+            <div class="import-steps">
+              <span [class.active]="importStep === 1">1. Upload</span>
+              <span [class.active]="importStep === 2">2. Preview</span>
+              <span [class.active]="importStep === 3">3. Confirm</span>
+              <span [class.active]="importStep === 4">4. Result</span>
+            </div>
+
+            <div class="modal-body">
+              <div class="history-message error" *ngIf="importError">{{ importError }}</div>
+              <div class="history-message" *ngIf="importLoading">Processing import file...</div>
+
+              <div *ngIf="importStep === 1" class="import-upload"
+                   (dragover)="$event.preventDefault()"
+                   (drop)="onImportFileDrop($event)">
+                <strong>Select an XLSX, XLS or CSV file</strong>
+                <p>Maximum file size: 10 MB</p>
+                <input #importInput type="file" accept=".xlsx,.xls,.csv"
+                       (change)="onImportFileSelected($event)" />
+                <button type="button" class="secondary-action-btn" (click)="importInput.click()">Choose File</button>
+                <button type="button" class="secondary-action-btn" (click)="downloadImportTemplate()">Download Sample Template</button>
+              </div>
+
+              <div *ngIf="importStep === 2 && importPreview">
+                <p><strong>{{ importFilename }}</strong> · {{ importPreview.totalRows }} detected rows</p>
+                <div class="import-summary">
+                  <div><small>Total rows</small><strong>{{ importPreview.totalRows }}</strong></div>
+                  <div><small>Valid</small><strong>{{ importPreview.validRecords }}</strong></div>
+                  <div><small>Duplicates</small><strong>{{ importPreview.duplicateRecords }}</strong></div>
+                  <div><small>Invalid</small><strong>{{ importPreview.invalidRecords }}</strong></div>
+                </div>
+                <button type="button" class="secondary-action-btn" *ngIf="importPreview.duplicateRecords || importPreview.invalidRecords"
+                        (click)="downloadImportProblems()">Download Invalid &amp; Duplicate Rows</button>
+                <div class="table-responsive import-preview-table">
+                  <table>
+                    <thead><tr><th>ROW</th><th>MEMBER</th><th>PHONE</th><th>EMAIL</th><th>GENDER</th><th>STATUS</th><th>REASON</th></tr></thead>
+                    <tbody>
+                      <tr *ngFor="let record of importPreview.records">
+                        <td>{{ record.rowNumber }}</td>
+                        <td>{{ record.fullName || '—' }}</td>
+                        <td>{{ record.phone || '—' }}</td>
+                        <td>{{ record.email || '—' }}</td>
+                        <td>{{ record.gender || '—' }}</td>
+                        <td>{{ record.status }}</td>
+                        <td>{{ record.reason || '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div *ngIf="importStep === 3">
+                <p>Confirm importing <strong>{{ importPreview.validRecords }}</strong> valid member records.</p>
+                <p>Existing duplicates and invalid records will not be inserted.</p>
+              </div>
+
+              <div *ngIf="importStep === 4 && selectedImportBatch">
+                <div class="import-summary">
+                  <div><small>Total rows</small><strong>{{ selectedImportBatch.totalRows }}</strong></div>
+                  <div><small>Imported</small><strong>{{ selectedImportBatch.importedCount }}</strong></div>
+                  <div><small>Duplicates</small><strong>{{ selectedImportBatch.duplicateCount }}</strong></div>
+                  <div><small>Invalid records</small><strong>{{ selectedImportBatch.failedCount }}</strong></div>
+                  <div><small>Failed</small><strong>{{ selectedImportBatch.failedCount }}</strong></div>
+                </div>
+                <button type="button" class="secondary-action-btn" (click)="downloadImportReport(selectedImportBatch, 'csv')">Download CSV Report</button>
+                <button type="button" class="secondary-action-btn" (click)="downloadImportReport(selectedImportBatch, 'xlsx')">Download Excel Report</button>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button type="button" class="cancel-btn" (click)="closeMemberImport()" [disabled]="importing">Close</button>
+              <button type="button" class="cancel-btn" *ngIf="importStep === 2" (click)="importStep = 1">Back</button>
+              <button type="button" class="save-btn" *ngIf="importStep === 2"
+                      [disabled]="importPreview?.validRecords === 0" (click)="importStep = 3">Continue</button>
+              <button type="button" class="save-btn" *ngIf="importStep === 3"
+                      [disabled]="importing" (click)="confirmMemberImport()">
+                {{ importing ? 'Importing…' : 'Confirm Import' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import History -->
+        <div class="modal-overlay" *ngIf="showImportHistory">
+          <div class="modal-container member-import-modal">
+            <div class="modal-header">
+              <div><span class="eyebrow">MEMBER IMPORTS</span><h2>Import History</h2></div>
+              <button type="button" class="close-btn" (click)="closeImportHistory()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="history-message" *ngIf="importHistoryLoading">Loading import history...</div>
+              <div class="history-message" *ngIf="!importHistoryLoading && importHistory.length === 0">No member imports found.</div>
+              <div class="table-responsive" *ngIf="importHistory.length">
+                <table>
+                  <thead><tr><th>FILE</th><th>DATE</th><th>TOTAL</th><th>IMPORTED</th><th>DUPLICATES</th><th>FAILED</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+                  <tbody>
+                    <tr *ngFor="let batch of importHistory">
+                      <td>{{ batch.filename }}</td>
+                      <td>{{ batch.createdAt | date:'dd MMM yyyy, hh:mm a' }}</td>
+                      <td>{{ batch.totalRows }}</td>
+                      <td>{{ batch.importedCount }}</td>
+                      <td>{{ batch.duplicateCount }}</td>
+                      <td>{{ batch.failedCount }}</td>
+                      <td>{{ batch.status }}</td>
+                      <td>
+                        <button type="button" class="history-btn" (click)="viewImportBatch(batch)">View</button>
+                        <button type="button" class="history-btn" (click)="downloadImportReport(batch)">Report</button>
+                        <button type="button" class="delete-btn" (click)="previewImportDeletion(batch)">Delete Members</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="import-deletion-preview" *ngIf="importDeletionPreview">
+                <h3>Delete Imported Members Preview</h3>
+                <p>{{ importDeletionPreview.filename }} · {{ importDeletionPreview.createdAt | date:'dd MMM yyyy, hh:mm a' }}</p>
+                <p>Imported: {{ importDeletionPreview.totalImported }} · Eligible:
+                  {{ importDeletionPreview.eligibleCount }} · Requiring review:
+                  {{ importDeletionPreview.requiringReviewCount }}</p>
+                <button type="button" class="delete-btn" [disabled]="importDeletionPreview.eligibleCount === 0"
+                        (click)="deleteImportedBatch(selectedImportBatch)">Move Eligible Members to Recycle Bin</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="member-header-actions">
+            <button type="button" class="secondary-action-btn" (click)="openImportHistory()">Import History</button>
+            <button type="button" class="secondary-action-btn" (click)="downloadImportTemplate()">Download Template</button>
+            <button type="button" class="secondary-action-btn" (click)="openMemberImport()">Import Excel</button>
+            <button class="add-btn" (click)="openAddForm()">
+                <span>＋</span> Add New Member
+            </button>
+        </div>
     </div>
 
     <!-- Stats -->
@@ -332,7 +474,7 @@
                 </div>
 
                 <!-- Membership Assignment Section -->
-                <div class="membership-section full-width" *ngIf="!isEditMode">
+                <div class="membership-section full-width">
 
                     <div class="membership-heading">
                         <span class="eyebrow">MEMBERSHIP</span>

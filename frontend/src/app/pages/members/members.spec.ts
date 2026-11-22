@@ -17,6 +17,14 @@ describe('Members', () => {
     addMember: ReturnType<typeof vi.fn>;
     updateMember: ReturnType<typeof vi.fn>;
     generateMemberQR: ReturnType<typeof vi.fn>;
+    previewMemberImport: ReturnType<typeof vi.fn>;
+    downloadMemberImportTemplate: ReturnType<typeof vi.fn>;
+    confirmMemberImport: ReturnType<typeof vi.fn>;
+    getMemberImportHistory: ReturnType<typeof vi.fn>;
+    getMemberImportBatch: ReturnType<typeof vi.fn>;
+    downloadMemberImportReport: ReturnType<typeof vi.fn>;
+    previewMemberImportDeletion: ReturnType<typeof vi.fn>;
+    deleteImportedMembers: ReturnType<typeof vi.fn>;
   };
   let planService: {
     getPlans: ReturnType<typeof vi.fn>;
@@ -42,7 +50,15 @@ describe('Members', () => {
       })),
       addMember: vi.fn(),
       updateMember: vi.fn(),
-      generateMemberQR: vi.fn()
+      generateMemberQR: vi.fn(),
+      previewMemberImport: vi.fn(),
+      downloadMemberImportTemplate: vi.fn(),
+      confirmMemberImport: vi.fn(),
+      getMemberImportHistory: vi.fn(),
+      getMemberImportBatch: vi.fn(),
+      downloadMemberImportReport: vi.fn(),
+      previewMemberImportDeletion: vi.fn(),
+      deleteImportedMembers: vi.fn()
     };
     planService = {
       getPlans: vi.fn().mockReturnValue(of({ plans: [] })),
@@ -292,6 +308,64 @@ describe('Members', () => {
     expect(memberService.addMember).toHaveBeenCalledTimes(1);
     expect(planService.assignMembership).toHaveBeenCalledTimes(2);
     expect(component.showForm).toBe(false);
+  });
+
+  it('opens the bulk member import workflow and rejects unsupported files', () => {
+    component.openMemberImport();
+    expect(component.showImportModal).toBe(true);
+    expect(component.importStep).toBe(1);
+
+    component.selectImportFile(new File(['test'], 'members.txt', { type: 'text/plain' }));
+
+    expect(component.importError).toContain('Unsupported file type');
+  });
+
+  it('rejects empty and oversized member import files', () => {
+    component.selectImportFile(new File([], 'members.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+    expect(component.importError).toBe('The selected file is empty.');
+
+    const oversized = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'members.csv', {
+      type: 'text/csv'
+    });
+    component.selectImportFile(oversized);
+    expect(component.importError).toBe('The file exceeds the 10 MB size limit.');
+  });
+
+  it('includes invalid and duplicate rows in the import confirmation payload', () => {
+    memberService.confirmMemberImport.mockReturnValue(of({
+      success: true,
+      batch: {
+        totalRows: 3,
+        importedCount: 1,
+        duplicateCount: 1,
+        failedCount: 1
+      }
+    }));
+    component.importFilename = 'members.xlsx';
+    component.importPreview = {
+      validRecords: 1,
+      records: [
+        { rowNumber: 2, status: 'VALID', fullName: 'Valid', phone: '9876543210' },
+        { rowNumber: 3, status: 'DUPLICATE', fullName: 'Duplicate', phone: '9876543211', reason: 'Duplicate phone' },
+        { rowNumber: 4, status: 'INVALID', fullName: '', phone: '123', reason: 'Member name is missing' }
+      ]
+    };
+
+    component.confirmMemberImport();
+
+    expect(memberService.confirmMemberImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'members.xlsx',
+        records: expect.arrayContaining([
+          expect.objectContaining({ status: 'VALID' }),
+          expect.objectContaining({ status: 'DUPLICATE' }),
+          expect.objectContaining({ status: 'INVALID' })
+        ])
+      }),
+      expect.any(String)
+    );
   });
 
   it('generates and displays a QR image for the selected member', async () => {

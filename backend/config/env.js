@@ -24,15 +24,31 @@ if (nodeEnv === 'production' && !process.env.FRONTEND_URL?.trim()) {
   throw new Error('FRONTEND_URL must be configured in production');
 }
 
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+const normalizeOrigin = (value) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return '';
+  }
+};
+
+const frontendUrl = normalizeOrigin(process.env.FRONTEND_URL) ||
+  'http://localhost:4200';
 const smtpPort = Number(process.env.SMTP_PORT || 587);
 if (process.env.SMTP_PORT && (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
   throw new Error('SMTP_PORT must be an integer between 1 and 65535');
 }
-const allowedOrigins = new Set([frontendUrl]);
-if (nodeEnv !== 'production') {
-  allowedOrigins.add('http://localhost:4200');
-  allowedOrigins.add('http://localhost:60949');
+const allowedOrigins = new Set([
+  'http://localhost:4200',
+  'https://gym-management-chi-three.vercel.app',
+  frontendUrl
+]);
+
+for (const value of String(process.env.ALLOWED_ORIGINS || '').split(',')) {
+  const origin = normalizeOrigin(value);
+  if (origin) allowedOrigins.add(origin);
 }
 
 const platformAdminOwnerIds = (process.env.PLATFORM_ADMIN_OWNER_IDS || '')

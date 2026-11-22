@@ -89,6 +89,19 @@ export class Members implements OnInit, OnChanges, OnDestroy {
   errorMessage = '';
   successMessage = '';
   deletingMemberId = '';
+  showImportModal = false;
+  showImportHistory = false;
+  importStep = 1;
+  importLoading = false;
+  importError = '';
+  importFile: File | null = null;
+  importFilename = '';
+  importPreview: any = null;
+  importHistory: any[] = [];
+  importHistoryLoading = false;
+  selectedImportBatch: any = null;
+  importDeletionPreview: any = null;
+  importing = false;
   private lastLoadedAt = 0;
   private plansLoadedAt = 0;
   private plansLoading = false;
@@ -900,6 +913,200 @@ totalDueAmount = 0;
     URL.revokeObjectURL(url);
   }
 
+  openMemberImport(): void {
+    this.showImportModal = true;
+    this.showImportHistory = false;
+    this.importStep = 1;
+    this.importError = '';
+    this.importFile = null;
+    this.importFilename = '';
+    this.importPreview = null;
+  }
+
+  closeMemberImport(): void {
+    if (this.importing) return;
+    this.showImportModal = false;
+  }
+
+  openImportHistory(): void {
+    this.showImportHistory = true;
+    this.importHistoryLoading = true;
+    this.memberService.getMemberImportHistory(1, 20)
+      .pipe(finalize(() => {
+        this.importHistoryLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          this.importHistory = response?.batches || [];
+        },
+        error: () => {
+          this.importError = 'Unable to load import history.';
+        }
+      });
+  }
+
+  closeImportHistory(): void {
+    this.showImportHistory = false;
+    this.selectedImportBatch = null;
+    this.importDeletionPreview = null;
+  }
+
+  onImportFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) this.selectImportFile(file);
+  }
+
+  onImportFileDrop(event: DragEvent): void {
+    event.preventDefault();
+    const file = event.dataTransfer?.files?.[0];
+    if (file) this.selectImportFile(file);
+  }
+
+  selectImportFile(file: File): void {
+    this.importError = '';
+    this.importPreview = null;
+    const lowerName = file.name.toLowerCase();
+    const allowed = ['.xlsx', '.xls', '.csv'].some(extension => lowerName.endsWith(extension));
+    if (!allowed) {
+      this.importError = 'Unsupported file type. Please select an XLSX, XLS or CSV file.';
+      return;
+    }
+    if (file.size === 0) {
+      this.importError = 'The selected file is empty.';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      this.importError = 'The file exceeds the 10 MB size limit.';
+      return;
+    }
+    this.importFile = file;
+    this.importFilename = file.name;
+    this.importLoading = true;
+    this.memberService.previewMemberImport(file).pipe(
+      finalize(() => {
+        this.importLoading = false;
+        this.changeDetector.markForCheck();
+      })
+    ).subscribe({
+      next: response => {
+        this.importPreview = response;
+        this.importStep = 2;
+      },
+      error: error => {
+        this.importError = error?.error?.message || 'Unable to read the uploaded file.';
+      }
+    });
+  }
+
+  downloadImportTemplate(): void {
+    this.memberService.downloadMemberImportTemplate().subscribe({
+      next: blob => this.downloadBlob(blob, 'member-import-template.xlsx')
+    });
+  }
+
+  downloadImportProblems(): void {
+    const rows = (this.importPreview?.records || [])
+      .filter((record: any) => record.status === 'INVALID' || record.status === 'DUPLICATE');
+    const escape = (value: any) => {
+      const text = String(value ?? '');
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = [
+      ['Row', 'Member Name', 'Phone', 'Status', 'Reason'].map(escape).join(','),
+      ...rows.map((record: any) => [
+        record.rowNumber,
+        record.fullName,
+        record.phone,
+        record.status,
+        record.reason
+      ].map(escape).join(','))
+    ].join('\r\n');
+    this.downloadBlob(
+      new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }),
+      'member-import-invalid-and-duplicate.csv'
+    );
+  }
+
+  confirmMemberImport(): void {
+    const records = (this.importPreview?.records || [])
+      .map((record: any) => ({
+        rowNumber: record.rowNumber,
+        fullName: record.fullName,
+        phone: record.phone,
+        email: record.email,
+        gender: record.gender,
+        status: record.status,
+        reason: record.reason
+      }));
+    if (!records.length) {
+      this.importError = 'There are no valid records ready to import.';
+      return;
+    }
+    const idempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `import${Date.now()}${Math.random().toString(36).slice(2, 12)}`;
+    this.importing = true;
+    this.importLoading = true;
+    this.memberService.confirmMemberImport({
+      filename: this.importFilename,
+      records
+    }, idempotencyKey).pipe(
+      finalize(() => {
+        this.importing = false;
+        this.importLoading = false;
+        this.changeDetector.markForCheck();
+      })
+    ).subscribe({
+      next: response => {
+        this.importStep = 4;
+        this.selectedImportBatch = response?.batch || null;
+        this.successMessage = 'Member import completed.';
+        this.loadMembers();
+      },
+      error: error => {
+        this.importError = error?.error?.message || 'Unable to complete the import.';
+      }
+    });
+  }
+
+  viewImportBatch(batch: any): void {
+    this.memberService.getMemberImportBatch(batch._id).subscribe({
+      next: response => {
+        this.selectedImportBatch = response?.batch || null;
+      }
+    });
+  }
+
+  downloadImportReport(batch: any, format: 'csv' | 'xlsx' = 'csv'): void {
+    this.memberService.downloadMemberImportReport(batch._id, format).subscribe({
+      next: blob => this.downloadBlob(blob, `import-${batch._id}.${format}`)
+    });
+  }
+
+  previewImportDeletion(batch: any): void {
+    this.memberService.previewMemberImportDeletion(batch._id).subscribe({
+      next: response => {
+        this.selectedImportBatch = batch;
+        this.importDeletionPreview = response;
+      }
+    });
+  }
+
+  deleteImportedBatch(batch: any): void {
+    if (!confirm(`Move imported members from "${batch.filename}" to the Recycle Bin? Members with related records will be skipped.`)) {
+      return;
+    }
+    this.memberService.deleteImportedMembers(batch._id).subscribe({
+      next: response => {
+        this.successMessage = `${response.movedToRecycleBin} members moved to Recycle Bin; ${response.requiresReview} require review.`;
+        this.importDeletionPreview = null;
+        this.loadMembers();
+      }
+    });
+  }
+
   // Open Add Form
   openAddForm(): void {
     this.isEditMode = false;
@@ -965,7 +1172,7 @@ totalDueAmount = 0;
 
     if (this.saving) return;
 
-    if (!this.isEditMode && this.memberForm.planId) {
+    if (this.memberForm.planId) {
       if (!this.memberForm.membershipStartDate) {
         this.errorMessage = 'Please select membership start date';
         return;
@@ -1032,6 +1239,16 @@ totalDueAmount = 0;
 
             if (!isEditMode && planId && memberId) {
               this.createdMemberId = memberId;
+              return membershipRequest(memberId).pipe(
+                map(assignment => ({
+                  response: assignment,
+                  memberId,
+                  assigned: true
+                }))
+              );
+            }
+
+            if (isEditMode && planId && memberId) {
               return membershipRequest(memberId).pipe(
                 map(assignment => ({
                   response: assignment,

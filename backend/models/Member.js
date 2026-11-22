@@ -90,6 +90,29 @@ const memberSchema = new mongoose.Schema(
             default: ''
         },
 
+        legacyMemberId: {
+            type: String,
+            default: '',
+            trim: true
+        },
+
+        importBatchId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'MemberImportBatch',
+            default: null
+        },
+
+        importedAt: {
+            type: Date,
+            default: null
+        },
+
+        importedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Owner',
+            default: null
+        },
+
         sourceEnquiryId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Enquiry',
@@ -122,6 +145,7 @@ memberSchema.index(
 memberSchema.index({ tenantId: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, assignedTrainerId: 1 });
+memberSchema.index({ tenantId: 1, importBatchId: 1, deletedAt: 1 });
 memberSchema.index(
     { tenantId: 1, sourceEnquiryId: 1 },
     { unique: true, partialFilterExpression: { sourceEnquiryId: { $type: 'objectId' } } }

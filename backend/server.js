@@ -8,6 +8,7 @@ const connectDB = require('./config/db');
 const { startAttendanceAutoCheckout } = require('./services/attendanceAutoCheckout');
 
 const dns = require('node:dns');
+const { buildCorsOptions } = require('./utils/corsConfig');
 
 dns.setServers([
   '1.1.1.1',
@@ -20,14 +21,9 @@ const app = express();
 app.use(helmet());
 
 // CORS Configuration
-app.use(cors({
-  origin: config.allowedOrigins,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+app.use(cors(buildCorsOptions(config.allowedOrigins)));
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 if (config.nodeEnv !== 'production') {
   app.use('/api', (req, res, next) => {

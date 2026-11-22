@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
 import { EMPTY, Observable, expand, reduce } from 'rxjs';
 import { environment } from '../../environments/environment';
 
@@ -90,5 +90,49 @@ export class MemberService {
     {}
   );
 }
+
+  previewMemberImport(file: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post(`${this.apiUrl}/import/preview`, formData);
+  }
+
+  downloadMemberImportTemplate(): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/import/template`, { responseType: 'blob' });
+  }
+
+  confirmMemberImport(payload: any, idempotencyKey: string): Observable<any> {
+    const headers = new HttpHeaders({ 'Idempotency-Key': idempotencyKey });
+    return this.http.post(`${this.apiUrl}/import/confirm`, payload, { headers });
+  }
+
+  getMemberImportHistory(page = 1, limit = 20): Observable<any> {
+    const params = new HttpParams().set('page', page).set('limit', limit);
+    return this.http.get(`${this.apiUrl}/import/history`, { params });
+  }
+
+  getMemberImportBatch(batchId: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/import/history/${batchId}`);
+  }
+
+  downloadMemberImportReport(batchId: string, format: 'csv' | 'xlsx' = 'csv'):
+    Observable<Blob> {
+    const params = new HttpParams().set('format', format);
+    return this.http.get(`${this.apiUrl}/import/history/${batchId}/report`, {
+      params,
+      responseType: 'blob'
+    });
+  }
+
+  previewMemberImportDeletion(batchId: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/import/history/${batchId}/delete-preview`);
+  }
+
+  deleteImportedMembers(batchId: string): Observable<any> {
+    return this.http.post(
+      `${this.apiUrl}/import/history/${batchId}/delete`,
+      { confirmation: 'DELETE' }
+    );
+  }
 
 }
