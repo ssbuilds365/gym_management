@@ -44,6 +44,22 @@ export class BusinessSettings implements OnInit, OnDestroy {
   sessionsError = '';
   sessionsMessage = '';
   passwordChanging = false;
+  kioskCredentialsLoading = false;
+  kioskCredentialSaving = false;
+  kioskCredentials: Array<{
+    _id: string;
+    credentialId: string;
+    label: string;
+    active: boolean;
+    expiresAt: string | null;
+    lastUsedAt: string | null;
+    revokedAt: string | null;
+    createdAt: string;
+  }> = [];
+  kioskCredentialLabel = '';
+  kioskCredentialError = '';
+  kioskCredentialMessage = '';
+  newKioskCredential: { credentialId: string; label: string; secret: string } | null = null;
   passwordError = '';
   passwordSuccess = '';
   showCurrentPassword = false;
@@ -77,7 +93,9 @@ export class BusinessSettings implements OnInit, OnDestroy {
     state: '',
     stateCode: '',
     gstPercentage: 0,
-    taxInclusive: true
+    taxInclusive: true,
+    faceAttendanceEnabled: false,
+    qrAttendanceEnabled: true
   };
   readonly businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Other'];
   readonly gstStates = GST_STATES;
@@ -91,10 +109,101 @@ export class BusinessSettings implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.load();
     this.loadSessions();
+    this.loadKioskCredentials();
   }
 
   ngOnDestroy(): void {
     this.clearLogoPreview();
+  }
+
+  loadKioskCredentials(): void {
+    this.kioskCredentialsLoading = true;
+    this.kioskCredentialError = '';
+    this.management.listKioskCredentials()
+      .pipe(finalize(() => {
+        this.kioskCredentialsLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => this.kioskCredentials = response.credentials || [],
+        error: error => {
+          this.kioskCredentialError = error.error?.message || 'Unable to load kiosk credentials.';
+        }
+      });
+  }
+
+  createKioskCredential(): void {
+    const label = this.kioskCredentialLabel.trim();
+    if (!label || this.kioskCredentialSaving) return;
+    this.kioskCredentialSaving = true;
+    this.kioskCredentialError = '';
+    this.kioskCredentialMessage = '';
+    this.newKioskCredential = null;
+    this.management.createKioskCredential(label)
+      .pipe(finalize(() => {
+        this.kioskCredentialSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          this.newKioskCredential = response.credential || null;
+          this.kioskCredentialMessage = 'Credential created. Copy the secret now; it will not be shown again.';
+          this.kioskCredentialLabel = '';
+          this.loadKioskCredentials();
+        },
+        error: error => {
+          this.kioskCredentialError = error.error?.message || 'Unable to create kiosk credential.';
+        }
+      });
+  }
+
+  rotateKioskCredential(credential: { _id: string; label: string }): void {
+    if (this.kioskCredentialSaving || !confirm(`Rotate "${credential.label}"? The old credential will stop working immediately.`)) return;
+    this.kioskCredentialSaving = true;
+    this.kioskCredentialError = '';
+    this.kioskCredentialMessage = '';
+    this.newKioskCredential = null;
+    this.management.rotateKioskCredential(credential._id, credential.label)
+      .pipe(finalize(() => {
+        this.kioskCredentialSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          this.newKioskCredential = response.credential || null;
+          this.kioskCredentialMessage = 'Credential rotated. Copy the new secret now; it will not be shown again.';
+          this.loadKioskCredentials();
+        },
+        error: error => {
+          this.kioskCredentialError = error.error?.message || 'Unable to rotate kiosk credential.';
+        }
+      });
+  }
+
+  revokeKioskCredential(credential: { _id: string; label: string }): void {
+    if (this.kioskCredentialSaving || !confirm(`Revoke "${credential.label}"? This kiosk will lose access immediately.`)) return;
+    this.kioskCredentialSaving = true;
+    this.kioskCredentialError = '';
+    this.kioskCredentialMessage = '';
+    this.newKioskCredential = null;
+    this.management.revokeKioskCredential(credential._id)
+      .pipe(finalize(() => {
+        this.kioskCredentialSaving = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: () => {
+          this.kioskCredentialMessage = 'Kiosk credential revoked.';
+          this.loadKioskCredentials();
+        },
+        error: error => {
+          this.kioskCredentialError = error.error?.message || 'Unable to revoke kiosk credential.';
+        }
+      });
+  }
+
+  dismissNewKioskCredential(): void {
+    this.newKioskCredential = null;
   }
 
   get hasOtherSessions(): boolean {
@@ -447,7 +556,9 @@ export class BusinessSettings implements OnInit, OnDestroy {
             state: business.state || '',
             stateCode: business.stateCode || '',
             gstPercentage: Number(business.gstPercentage || 0),
-            taxInclusive: business.taxInclusive !== false
+            taxInclusive: business.taxInclusive !== false,
+            faceAttendanceEnabled: business.faceAttendanceEnabled === true,
+            qrAttendanceEnabled: business.qrAttendanceEnabled !== false
           };
           this.logoStorage = business.logoStorage || null;
         },
@@ -486,7 +597,9 @@ export class BusinessSettings implements OnInit, OnDestroy {
             state: business.state || '',
             stateCode: business.stateCode || '',
             gstPercentage: Number(business.gstPercentage || 0),
-            taxInclusive: business.taxInclusive !== false
+            taxInclusive: business.taxInclusive !== false,
+            faceAttendanceEnabled: business.faceAttendanceEnabled === true,
+            qrAttendanceEnabled: business.qrAttendanceEnabled !== false
           };
           this.logoStorage = business.logoStorage || null;
           localStorage.setItem('business', JSON.stringify(business));

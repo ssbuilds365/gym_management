@@ -84,6 +84,23 @@ export class MemberService {
     return this.http.delete<any>(`${this.apiUrl}/${id}`);
   }
 
+  getFaceStatus(memberId: string): Observable<any> {
+    return this.http.get(`${environment.apiUrl}/biometric/credentials/status/${memberId}`);
+  }
+
+  registerFace(memberId: string, descriptor: number[], consentTextVersion: string): Observable<any> {
+    return this.http.post(`${environment.apiUrl}/biometric/credentials/member/${memberId}/face`, {
+      descriptor,
+      modelVersion: 'face-api.js-v1-128d',
+      consentGranted: true,
+      consentTextVersion
+    });
+  }
+
+  removeFace(memberId: string): Observable<any> {
+    return this.http.delete(`${environment.apiUrl}/biometric/credentials/member/${memberId}/face`);
+  }
+
   generateMemberQR(memberId: string): Observable<any> {
   return this.http.post(
     `${this.apiUrl}/${memberId}/generate-qr`,

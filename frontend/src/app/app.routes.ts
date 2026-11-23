@@ -2,6 +2,24 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
+  {
+    path: 'attendance-kiosk',
+    pathMatch: 'full',
+    loadComponent: () => import('./pages/attendance-kiosk/attendance-kiosk')
+      .then(module => module.AttendanceKiosk)
+  },
+
+  {
+    path: 'attendance-kiosk/:section',
+    loadComponent: () => import('./pages/attendance-kiosk/attendance-kiosk')
+      .then(module => module.AttendanceKiosk)
+  },
+
+  {
+    path: 'attendance-kiosk/:section/:subsection',
+    loadComponent: () => import('./pages/attendance-kiosk/attendance-kiosk')
+      .then(module => module.AttendanceKiosk)
+  },
 
   {
     path: 'register',

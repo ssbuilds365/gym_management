@@ -458,6 +458,19 @@ table {
   }
 }
 
+.face-status {
+  display: inline-block;
+  padding: 5px 8px;
+  border-radius: 20px;
+  background: #333;
+  color: #ddd;
+  font-size: 11px;
+  font-weight: 700;
+
+  &.registered { background: #123a2a; color: #5ce0a1; }
+  &.unavailable { background: #403018; color: #ffc76b; }
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -712,7 +725,7 @@ table {
   overflow-x: auto;
 
   table {
-    min-width: 1100px;
+    min-width: 1240px;
     width: 100%;
   }
 }

@@ -203,7 +203,8 @@ export class App implements OnInit, OnDestroy {
       currentUrl.startsWith('/login') ||
       currentUrl.startsWith('/register') ||
       currentUrl.startsWith('/forgot-password') ||
-      currentUrl.startsWith('/reset-password')
+      currentUrl.startsWith('/reset-password') ||
+      currentUrl.startsWith('/attendance-kiosk')
     ) {
       this.sessionChecking = false;
       this.sessionVerificationError = '';
@@ -310,7 +311,8 @@ export class App implements OnInit, OnDestroy {
       this.router.url.startsWith('/register') ||
       this.router.url.startsWith('/login') ||
       this.router.url.startsWith('/forgot-password') ||
-      this.router.url.startsWith('/reset-password')
+      this.router.url.startsWith('/reset-password') ||
+      this.router.url.startsWith('/attendance-kiosk')
     );
   }
 

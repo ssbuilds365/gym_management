@@ -6,8 +6,11 @@ export const sessionCookieInterceptor: HttpInterceptorFn = (request, next) => {
   const isApiRequest = request.url.startsWith(apiUrl);
   if (!isApiRequest) return next(request);
 
+  const isKioskRequest = request.url.startsWith(`${apiUrl}/kiosk/`);
   return next(request.clone({
     withCredentials: true,
-    headers: request.headers.delete('Authorization')
+    headers: isKioskRequest
+      ? request.headers
+      : request.headers.delete('Authorization')
   }));
 };

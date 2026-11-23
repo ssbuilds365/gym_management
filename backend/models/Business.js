@@ -122,6 +122,16 @@ const businessSchema = new mongoose.Schema(
       default: true
     },
 
+    faceAttendanceEnabled: {
+      type: Boolean,
+      default: false
+    },
+
+    qrAttendanceEnabled: {
+      type: Boolean,
+      default: true
+    },
+
     status: {
       type: String,
       enum: ['Active', 'Inactive', 'Suspended'],

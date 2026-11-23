@@ -160,4 +160,20 @@ export class ManagementService {
     return this.http.delete(`${this.baseUrl}/business/settings/logo`);
   }
 
+  listKioskCredentials(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/biometric/kiosk-credentials`);
+  }
+
+  createKioskCredential(label: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/biometric/kiosk-credentials`, { label });
+  }
+
+  rotateKioskCredential(id: string, label?: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/biometric/kiosk-credentials/${id}/rotate`, { label });
+  }
+
+  revokeKioskCredential(id: string): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/biometric/kiosk-credentials/${id}`);
+  }
+
 }

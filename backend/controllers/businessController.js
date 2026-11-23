@@ -25,11 +25,13 @@ const businessFields = [
   'state',
   'stateCode',
   'gstPercentage',
-  'taxInclusive'
+  'taxInclusive',
+  'faceAttendanceEnabled',
+  'qrAttendanceEnabled'
 ];
 const businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Other'];
 const settingsProjection =
-  'businessName businessType timeZone ownerName phone email address logoUrl logoStorage subscriptionStatus gstEnabled gstinNumber legalBusinessName registeredBusinessAddress state stateCode gstPercentage taxInclusive';
+  'businessName businessType timeZone ownerName phone email address logoUrl logoStorage subscriptionStatus gstEnabled gstinNumber legalBusinessName registeredBusinessAddress state stateCode gstPercentage taxInclusive faceAttendanceEnabled qrAttendanceEnabled';
 
 cloudinary.config({
   cloud_name: config.cloudinary.cloudName,
@@ -189,6 +191,12 @@ exports.updateSettings = async (req, res) => {
       success: false,
       message: 'Select tax-inclusive or tax-exclusive pricing'
     });
+  }
+  if (updates.faceAttendanceEnabled !== undefined && typeof updates.faceAttendanceEnabled !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'Face attendance enabled must be true or false' });
+  }
+  if (updates.qrAttendanceEnabled !== undefined && typeof updates.qrAttendanceEnabled !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'QR attendance enabled must be true or false' });
   }
   if (updates.gstPercentage !== undefined) {
     const rate = Number(updates.gstPercentage);

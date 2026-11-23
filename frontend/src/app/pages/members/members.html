@@ -167,6 +167,9 @@
     <div class="message-box success" *ngIf="successMessage" role="status">
         {{ successMessage }}
     </div>
+    <div class="message-box error" *ngIf="biometricActionError" role="alert">
+        {{ biometricActionError }}
+    </div>
 
     <!-- Filters -->
     <div class="filter-card">
@@ -266,6 +269,7 @@
                         <th>EXPIRY DATE</th>
                         <th>PAYMENT</th>
                         <th>STATUS</th>
+                        <th>FACE BIOMETRIC</th>
                         <th>ACTIONS</th>
                     </tr>
                 </thead>
@@ -330,6 +334,40 @@
                             </span>
                         </td>
 
+                        <td>
+                            <span class="face-status"
+                                [ngClass]="member.biometricStatus?.toLowerCase() || 'loading'"
+                                [title]="member.biometricStatusError || ''">
+                                {{
+                                  member.biometricStatusLoading ? 'Checking…' :
+                                  member.biometricStatus === 'Registered' ? 'Face Registered' :
+                                  member.biometricStatus === 'NotRegistered' ? 'Face Not Registered' :
+                                  'Status unavailable'
+                                }}
+                            </span>
+                            <small *ngIf="member.biometricStatus === 'Registered' && member.biometricRegisteredAt">
+                                {{ member.biometricRegisteredAt | date:'dd MMM yyyy' }}
+                            </small>
+                            <button type="button" class="history-btn" *ngIf="member.biometricStatus === 'Unavailable'"
+                                (click)="loadFaceStatus(member._id)">Retry status</button>
+                            <div class="face-row-actions">
+                                <button type="button" class="history-btn"
+                                    *ngIf="member.biometricStatus === 'NotRegistered'"
+                                    (click)="openFaceEnrollment(member)" [disabled]="member.status !== 'Active'"
+                                    title="Face registration requires an active member">Register Face</button>
+                                <button type="button" class="history-btn"
+                                    *ngIf="member.biometricStatus === 'Registered'"
+                                    (click)="openFaceEnrollment(member)" [disabled]="member.status !== 'Active'"
+                                    title="Face registration requires an active member">Update Face</button>
+                                <button type="button" class="delete-btn"
+                                    *ngIf="member.biometricStatus === 'Registered'"
+                                    (click)="removeFaceForMember(member)"
+                                    [disabled]="faceRemovingMemberId === member._id">
+                                    {{ faceRemovingMemberId === member._id ? 'Removing…' : 'Remove Face' }}
+                                </button>
+                            </div>
+                        </td>
+
                         <!-- Actions -->
                         <!-- Actions -->
                         <td>
@@ -362,7 +400,7 @@
                     </tr>
 
                     <tr *ngIf="!loading && members.length === 0">
-                        <td colspan="11" class="empty-state">
+                        <td colspan="12" class="empty-state">
                             No members found. Add your first member!
                         </td>
                     </tr>
@@ -471,6 +509,37 @@
                     <label>Notes</label>
                     <textarea name="notes" [(ngModel)]="memberForm.notes"
                         placeholder="Additional information"></textarea>
+                </div>
+
+                <div class="membership-section full-width" *ngIf="isEditMode">
+                    <div class="membership-heading">
+                        <span class="eyebrow">BIOMETRIC REGISTRATION</span>
+                        <h3>Face Registration</h3>
+                        <p><strong>{{ memberForm.fullName }}</strong> · Member ID: {{ selectedMemberId }}</p>
+                        <p>Status: <strong>{{ faceStatus }}</strong>
+                            <span *ngIf="faceRegisteredAt"> · Registered {{ faceRegisteredAt | date:'medium' }}</span>
+                        </p>
+                    </div>
+                    <p class="error" *ngIf="faceEnrollmentError">{{ faceEnrollmentError }}</p>
+                    <p class="success" *ngIf="faceEnrollmentMessage">{{ faceEnrollmentMessage }}</p>
+                    <label class="form-group full-width">
+                        <input type="checkbox" [(ngModel)]="faceConsentGranted" name="faceConsentGranted">
+                        I have verified this member and obtained informed consent to capture and store a face recognition template for gym attendance.
+                    </label>
+                    <video #faceVideo *ngIf="faceCameraActive" autoplay muted playsinline class="face-enrollment-preview"></video>
+                    <small *ngIf="faceCameraActive">
+                        Center one face in the preview and keep still. Three face samples will be captured; raw images are not uploaded or stored.
+                    </small>
+                    <div class="membership-footer-actions">
+                        <button type="button" class="save-btn" (click)="startFaceEnrollment()" [disabled]="faceCameraActive || faceEnrollmentLoading || !faceConsentGranted">
+                            {{ faceStatus === 'Registered' ? 'Update Face' : 'Register Face' }}
+                        </button>
+                        <button type="button" class="save-btn" *ngIf="faceCameraActive" (click)="captureAndRegisterFace()" [disabled]="faceEnrollmentLoading || !faceConsentGranted">
+                            {{ faceEnrollmentLoading ? 'Saving…' : 'Capture &amp; Save' }}
+                        </button>
+                        <button type="button" class="cancel-btn" *ngIf="faceStatus === 'Registered'" (click)="removeRegisteredFace()">Remove Face</button>
+                        <button type="button" class="cancel-btn" *ngIf="faceCameraActive" (click)="stopFaceCamera()">Cancel Camera</button>
+                    </div>
                 </div>
 
                 <!-- Membership Assignment Section -->

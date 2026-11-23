@@ -53,6 +53,13 @@ const attendanceSchema = new mongoose.Schema(
       default: 'Manual'
     },
 
+    kioskIdempotencyKey: {
+      type: String,
+      trim: true,
+      default: null,
+      select: false
+    },
+
     status: {
       type: String,
       enum: ['Present', 'Absent', 'Late'],
@@ -84,5 +91,20 @@ attendanceSchema.index({
   attendanceDate: -1,
   checkIn: -1
 });
+attendanceSchema.index(
+  { tenantId: 1, kioskIdempotencyKey: 1 },
+  {
+    name: 'tenant_kiosk_idempotency_unique',
+    unique: true,
+    partialFilterExpression: { kioskIdempotencyKey: { $type: 'string' } }
+  }
+);
+attendanceSchema.index(
+  { tenantId: 1, memberId: 1, attendanceDate: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { attendanceType: 'Biometric' }
+  }
+);
 
 module.exports = mongoose.model('Attendance', attendanceSchema);

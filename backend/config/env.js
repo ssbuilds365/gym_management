@@ -1,7 +1,9 @@
 const path = require('node:path');
 const dotenv = require('dotenv');
+const { getEnvironmentValue } = require('../utils/environmentValue');
 
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const dotenvResult = dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const fileEnvironment = dotenvResult.parsed || {};
 
 const requiredVariables = ['MONGODB_URI'];
 const missingVariables = requiredVariables.filter(
@@ -23,6 +25,13 @@ const nodeEnv = process.env.NODE_ENV || 'development';
 if (nodeEnv === 'production' && !process.env.FRONTEND_URL?.trim()) {
   throw new Error('FRONTEND_URL must be configured in production');
 }
+
+const kioskTokenSecret = getEnvironmentValue('KIOSK_TOKEN_SECRET', process.env, fileEnvironment);
+const kioskTokenSecretConfigured = kioskTokenSecret.length >= 32;
+const biometricTemplateKey = getEnvironmentValue('BIOMETRIC_TEMPLATE_KEY', process.env, fileEnvironment);
+const biometricTemplateKeyConfigured =
+  Buffer.from(biometricTemplateKey, 'base64').length === 32;
+const biometricKeyVersion = getEnvironmentValue('BIOMETRIC_KEY_VERSION', process.env, fileEnvironment) || 'v1';
 
 const normalizeOrigin = (value) => {
   const trimmed = String(value || '').trim();
@@ -71,6 +80,11 @@ module.exports = Object.freeze({
     clusterName: process.env.ATLAS_CLUSTER_NAME || ''
   }),
   jwtSecret: process.env.JWT_SECRET || '',
+  kioskTokenSecret,
+  kioskTokenSecretConfigured,
+  biometricTemplateKey,
+  biometricTemplateKeyConfigured,
+  biometricKeyVersion,
   frontendUrl,
   smtp: Object.freeze({
     host: process.env.SMTP_HOST || '',

@@ -3,6 +3,8 @@ import {
   ChangeDetectorRef,
   Component,
   EventEmitter,
+  ElementRef,
+  ViewChild,
   OnDestroy,
   Input,
   OnChanges,
@@ -17,12 +19,14 @@ import { MembershipPlanService } from '../../services/membership-plan';
 import * as QRCode from 'qrcode';
 import { PaymentService } from '../../services/payment';
 import { DashboardService } from '../../services/dashboard';
+import { CameraService, CameraError } from '../../services/camera';
 import { jsPDF } from 'jspdf';
 import { environment } from '../../../environments/environment';
 import {
   Subscription,
   Observable,
   finalize,
+  firstValueFrom,
   forkJoin,
   from,
   switchMap,
@@ -88,6 +92,7 @@ export class Members implements OnInit, OnChanges, OnDestroy {
   dataLoaded = false;
   errorMessage = '';
   successMessage = '';
+  biometricActionError = '';
   deletingMemberId = '';
   showImportModal = false;
   showImportHistory = false;
@@ -145,6 +150,18 @@ qrMemberPhone = '';
 selectedQrMember: any = null;
 private qrSubscription?: Subscription;
 
+@ViewChild('faceVideo') faceVideo?: ElementRef<HTMLVideoElement>;
+faceStatus = 'NotRegistered';
+faceRegisteredAt: string | null = null;
+faceEnrollmentLoading = false;
+faceEnrollmentError = '';
+faceEnrollmentMessage = '';
+faceConsentGranted = false;
+faceCameraActive = false;
+faceRemovingMemberId = '';
+private faceStatusRequestSequence = 0;
+private readonly faceStatusRequestIds = new Map<string, number>();
+
 // Financial Details
 showFinancialDetails = false;
 financialLoading = false;
@@ -170,6 +187,7 @@ totalDueAmount = 0;
     private planService: MembershipPlanService,
     private paymentService: PaymentService,
     private dashboardService: DashboardService,
+    private cameraService: CameraService,
     private changeDetector: ChangeDetectorRef
   ) {}
 
@@ -239,6 +257,12 @@ totalDueAmount = 0;
 
       const response = result.response;
       this.members = response.members || [];
+      this.faceStatusRequestIds.clear();
+      this.members.forEach(member => {
+        member.biometricStatusLoading = true;
+        member.biometricStatus = 'Loading';
+        this.requestFaceStatus(member._id, false);
+      });
       this.members.forEach(member => {
         if (this.selectedMemberRecords.has(member._id)) {
           this.selectedMemberRecords.set(member._id, member);
@@ -324,6 +348,7 @@ totalDueAmount = 0;
   }
 
   ngOnDestroy(): void {
+    this.stopFaceCamera();
     this.memberQuerySubscription?.unsubscribe();
     this.memberQueries.complete();
     this.historySubscription?.unsubscribe();
@@ -1111,6 +1136,11 @@ totalDueAmount = 0;
   openAddForm(): void {
     this.isEditMode = false;
     this.selectedMemberId = '';
+    this.faceConsentGranted = false;
+    this.faceStatus = 'NotRegistered';
+    this.faceRegisteredAt = null;
+    this.faceEnrollmentError = '';
+    this.faceEnrollmentMessage = '';
     this.createdMemberId = '';
     this.memberCreatedWithoutId = false;
     this.memberForm = this.getEmptyForm();
@@ -1122,6 +1152,11 @@ totalDueAmount = 0;
   openEditForm(member: any): void {
     this.isEditMode = true;
     this.selectedMemberId = member._id;
+    this.faceConsentGranted = false;
+    this.faceStatus = 'NotRegistered';
+    this.faceRegisteredAt = null;
+    this.faceEnrollmentError = '';
+    this.faceEnrollmentMessage = '';
     this.createdMemberId = '';
     this.memberCreatedWithoutId = false;
 
@@ -1149,9 +1184,219 @@ totalDueAmount = 0;
 
     this.showForm = true;
     this.loadPlans();
+    this.loadFaceStatus(member._id);
+  }
+
+  openFaceEnrollment(member: any): void {
+    this.openEditForm(member);
+  }
+
+  loadFaceStatus(memberId: string): void {
+    this.faceEnrollmentError = '';
+    this.faceEnrollmentMessage = '';
+    this.requestFaceStatus(memberId, true);
+  }
+
+  private requestFaceStatus(memberId: string, updateForm: boolean): void {
+    const requestId = ++this.faceStatusRequestSequence;
+    this.faceStatusRequestIds.set(memberId, requestId);
+    const listedMember = this.members.find(member => member._id === memberId);
+    if (listedMember) {
+      listedMember.biometricStatusLoading = true;
+      listedMember.biometricStatus = 'Loading';
+    }
+    if (updateForm && this.selectedMemberId === memberId) this.faceStatus = 'Loading';
+
+    this.memberService.getFaceStatus(memberId).subscribe({
+      next: response => {
+        if (this.faceStatusRequestIds.get(memberId) !== requestId) return;
+        const status = response?.success === true &&
+          ['Registered', 'NotRegistered'].includes(response.status)
+          ? response.status
+          : 'Unavailable';
+        const member = this.members.find(item => item._id === memberId);
+        if (member) {
+          member.biometricStatusLoading = false;
+          member.biometricStatus = status;
+          member.biometricRegisteredAt = response.registeredAt || null;
+          member.biometricStatusError = status === 'Unavailable'
+            ? 'Unable to load face registration status.'
+            : '';
+        }
+        if (updateForm && this.selectedMemberId === memberId) {
+          this.faceStatus = status;
+          this.faceRegisteredAt = response.registeredAt || null;
+          if (status === 'Unavailable') {
+            this.faceEnrollmentError = 'Unable to load face registration status.';
+          }
+        }
+        this.changeDetector.markForCheck();
+      },
+      error: error => {
+        if (this.faceStatusRequestIds.get(memberId) !== requestId) return;
+        const member = this.members.find(item => item._id === memberId);
+        if (member) {
+          member.biometricStatusLoading = false;
+          member.biometricStatus = 'Unavailable';
+          member.biometricStatusError = error.error?.message || 'Unable to load face registration status.';
+        }
+        if (updateForm && this.selectedMemberId === memberId) {
+          this.faceStatus = 'Unavailable';
+          this.faceEnrollmentError = error.error?.message || 'Unable to load face registration status.';
+        }
+        this.changeDetector.markForCheck();
+      }
+    });
+  }
+
+  async startFaceEnrollment(): Promise<void> {
+    if (!this.selectedMemberId || !this.faceConsentGranted) {
+      this.faceEnrollmentError = 'Verify the member identity and obtain informed consent before enrollment.';
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.faceEnrollmentError = 'Camera access requires HTTPS and a supported browser.';
+      return;
+    }
+    this.faceEnrollmentError = '';
+    this.faceEnrollmentMessage = '';
+    try {
+      if (!this.faceVideo) {
+        this.faceCameraActive = true;
+        this.changeDetector.detectChanges();
+      }
+      if (!this.faceVideo) throw new Error('Camera preview could not be rendered.');
+      await this.cameraService.open(this.faceVideo.nativeElement, 'user');
+      this.faceCameraActive = true;
+      this.changeDetector.detectChanges();
+    } catch (error: any) {
+      this.stopFaceCamera();
+      this.faceEnrollmentError = error instanceof CameraError
+        ? error.message
+        : 'Camera is unavailable.';
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  async captureAndRegisterFace(): Promise<void> {
+    if (!this.selectedMemberId || !this.faceConsentGranted || !this.faceCameraActive || this.faceEnrollmentLoading) return;
+    const memberId = this.selectedMemberId;
+    this.faceEnrollmentLoading = true;
+    this.faceEnrollmentError = '';
+    this.faceEnrollmentMessage = 'Position one face in the guide. Capturing 3 samples…';
+    try {
+      const faceApi = await import('face-api.js');
+      await Promise.all([
+        faceApi.nets.tinyFaceDetector.loadFromUri('/models'),
+        faceApi.nets.faceLandmark68Net.loadFromUri('/models'),
+        faceApi.nets.faceRecognitionNet.loadFromUri('/models')
+      ]);
+      const video = this.faceVideo?.nativeElement;
+      if (!video) throw new Error('Camera preview is unavailable.');
+
+      const samples: number[][] = [];
+      const sampleCount = 3;
+      for (let index = 0; index < sampleCount; index += 1) {
+        if (this.selectedMemberId !== memberId || !this.faceCameraActive) {
+          throw new Error('Face capture was cancelled.');
+        }
+        const detections = await faceApi
+          .detectAllFaces(
+            video,
+            new faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.6 })
+          )
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+        if (detections.length !== 1) {
+          throw new Error(detections.length === 0
+            ? 'No face was detected. Position the member directly in the camera guide.'
+            : 'More than one face is visible. Ensure only the selected member is in view.');
+        }
+        const descriptor = Array.from(detections[0].descriptor);
+        if (descriptor.length !== 128 || descriptor.some(value => !Number.isFinite(value))) {
+          throw new Error('The face recognition model returned an invalid template.');
+        }
+        samples.push(descriptor);
+        this.faceEnrollmentMessage = `Face sample ${index + 1} of ${sampleCount} captured. Keep the member centered.`;
+        this.changeDetector.markForCheck();
+        if (index + 1 < sampleCount) {
+          await new Promise(resolve => setTimeout(resolve, 350));
+        }
+      }
+
+      const descriptor = samples[0].map((_, index) =>
+        samples.reduce((sum, sample) => sum + sample[index], 0) / samples.length
+      );
+      const response = await firstValueFrom(this.memberService.registerFace(
+        memberId,
+        descriptor,
+        'face-biometric-consent-v1'
+      ));
+      if (response?.success !== true) {
+        throw new Error(response?.message || 'Unable to save face registration.');
+      }
+      this.faceEnrollmentMessage = response.message || 'Face registration saved securely.';
+      this.stopFaceCamera();
+      this.requestFaceStatus(memberId, true);
+    } catch (error: any) {
+      this.faceEnrollmentError = error?.error?.message || error?.message || 'Unable to capture face.';
+    } finally {
+      this.faceEnrollmentLoading = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  removeFaceForMember(member: any): void {
+    const memberId = String(member?._id || '');
+    if (!memberId || this.faceRemovingMemberId) return;
+    if (!confirm(`Remove ${member.fullName || 'this member'}'s face registration and withdraw biometric consent?`)) return;
+    this.faceRemovingMemberId = memberId;
+    this.biometricActionError = '';
+    this.memberService.removeFace(memberId).pipe(
+      finalize(() => {
+        this.faceRemovingMemberId = '';
+        this.changeDetector.markForCheck();
+      })
+    ).subscribe({
+      next: response => {
+        if (response?.success !== true) {
+          const message = response?.message || 'Unable to remove face registration.';
+          if (this.selectedMemberId === memberId) this.faceEnrollmentError = message;
+          else this.biometricActionError = message;
+          return;
+        }
+        this.successMessage = 'Face registration removed.';
+        if (this.selectedMemberId === memberId) {
+          this.faceEnrollmentMessage = 'Face registration removed.';
+        }
+        this.requestFaceStatus(memberId, this.selectedMemberId === memberId);
+      },
+      error: error => {
+        const message = error.error?.message || 'Unable to remove face registration.';
+        if (this.selectedMemberId === memberId) this.faceEnrollmentError = message;
+        else this.biometricActionError = message;
+      }
+    });
+  }
+
+  removeRegisteredFace(): void {
+    if (!this.selectedMemberId) return;
+    this.removeFaceForMember({
+      _id: this.selectedMemberId,
+      fullName: this.memberForm.fullName
+    });
+  }
+
+  stopFaceCamera(): void {
+    this.cameraService.stop();
+    if (this.faceVideo?.nativeElement) this.faceVideo.nativeElement.srcObject = null;
+    this.faceCameraActive = false;
+    this.changeDetector.markForCheck();
   }
 
   closeForm(): void {
+    this.stopFaceCamera();
+    this.faceConsentGranted = false;
     this.showForm = false;
     this.createdMemberId = '';
     this.memberCreatedWithoutId = false;

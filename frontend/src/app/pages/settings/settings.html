@@ -92,6 +92,70 @@
     <button class="primary-btn" [disabled]="saving || settingsForm.invalid">{{ saving ? 'Saving…' : 'Save settings' }}</button>
   </form>
 
+  <section class="settings-panel" *ngIf="!loading" aria-labelledby="biometric-settings-title">
+    <div class="wide">
+      <span class="eyebrow">ATTENDANCE SETTINGS</span>
+      <h3 id="biometric-settings-title">Biometric Attendance</h3>
+      <p>Control kiosk attendance methods. Face recognition is processed on the kiosk device; templates are encrypted at rest.</p>
+    </div>
+    <label class="wide">
+      <input type="checkbox" name="faceAttendanceEnabled" [(ngModel)]="form.faceAttendanceEnabled">
+      Enable Face Attendance
+    </label>
+    <label class="wide">
+      <input type="checkbox" name="qrAttendanceEnabled" [(ngModel)]="form.qrAttendanceEnabled">
+      Enable QR Attendance fallback
+    </label>
+    <div class="wide">
+      <a class="primary-btn" href="/attendance-kiosk" target="_blank" rel="noopener">Open Attendance Kiosk</a>
+      <small>Face enrollment must be initiated by authorized staff from the Member details screen.</small>
+    </div>
+
+    <div class="wide" style="margin-top: 24px;">
+      <h3>Kiosk Credential Management</h3>
+      <p>Create a credential for this gym’s Android kiosk. The secret is shown once and is stored only as a salted hash.</p>
+      <div class="form-grid">
+        <label class="form-group">
+          Credential label
+          <input name="kioskCredentialLabel" [(ngModel)]="kioskCredentialLabel" maxlength="80" placeholder="Reception Android tablet">
+        </label>
+        <button type="button" class="primary-btn" (click)="createKioskCredential()"
+          [disabled]="kioskCredentialSaving || !kioskCredentialLabel.trim()">Generate Credential</button>
+      </div>
+
+      <p class="success" *ngIf="kioskCredentialMessage" role="status">{{ kioskCredentialMessage }}</p>
+      <p class="error" *ngIf="kioskCredentialError" role="alert">{{ kioskCredentialError }}</p>
+
+      <section class="logo-upload" *ngIf="newKioskCredential" role="alert">
+        <h4>Copy these kiosk credentials now</h4>
+        <p><strong>Credential ID</strong><br><code>{{ newKioskCredential.credentialId }}</code></p>
+        <p><strong>One-time Kiosk Secret</strong><br><code>{{ newKioskCredential.secret }}</code></p>
+        <button type="button" class="secondary-btn" (click)="dismissNewKioskCredential()">I have saved the secret</button>
+      </section>
+
+      <p *ngIf="kioskCredentialsLoading">Loading kiosk credentials…</p>
+      <div class="session-list" *ngIf="!kioskCredentialsLoading">
+        <article class="session-item" *ngFor="let credential of kioskCredentials">
+          <div class="session-device">
+            <span class="device-icon" aria-hidden="true">▦</span>
+            <div>
+              <strong>{{ credential.label }} <span class="current-session" *ngIf="credential.active">Active</span></strong>
+              <small>{{ credential.credentialId }}</small>
+              <small *ngIf="credential.lastUsedAt">Last used {{ credential.lastUsedAt | date:'medium' }}</small>
+              <small *ngIf="credential.revokedAt">Revoked {{ credential.revokedAt | date:'medium' }}</small>
+              <small *ngIf="!credential.revokedAt">Created {{ credential.createdAt | date:'medium' }}</small>
+            </div>
+          </div>
+          <div *ngIf="credential.active">
+            <button type="button" class="secondary-btn" (click)="rotateKioskCredential(credential)" [disabled]="kioskCredentialSaving">Rotate</button>
+            <button type="button" class="logo-remove-btn" (click)="revokeKioskCredential(credential)" [disabled]="kioskCredentialSaving">Revoke</button>
+          </div>
+        </article>
+        <p *ngIf="kioskCredentials.length === 0">No kiosk credentials exist for this gym.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="security-panel">
     <div class="security-heading">
       <div>

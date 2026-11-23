@@ -61,6 +61,8 @@ app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/expenses', require('./routes/expenseRoutes'));
 app.use('/api/system', require('./routes/systemRoutes'));
 app.use('/api/global-messages', require('./routes/globalMessageRoutes'));
+app.use('/api/kiosk', require('./routes/kioskRoutes'));
+app.use('/api/biometric', require('./routes/biometricRoutes'));
 
 // Root Route
 app.get('/', (req, res) => {
@@ -84,6 +86,11 @@ const startServer = async () => {
   try {
     await connectDB();
     await startAttendanceAutoCheckout();
+    if (!config.kioskTokenSecretConfigured) {
+      console.warn(
+        '[config] KIOSK_TOKEN_SECRET is missing or shorter than 32 characters; attendance kiosk authorization is disabled.'
+      );
+    }
 
     app.listen(config.port, () => {
       console.log(`Server running on port ${config.port}`);
