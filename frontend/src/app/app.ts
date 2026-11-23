@@ -264,7 +264,10 @@ export class App implements OnInit, OnDestroy {
           }
         },
         error: (error) => {
-          console.error('Session verification failed:', error);
+          console.error('Session verification failed:', {
+            status: error.status,
+            code: error.error?.code
+          });
           if (error.status === 401) {
             const reason = error.error?.code === 'SESSION_EXPIRED' ? 'expired'
               : error.error?.code === 'SESSION_REVOKED' ? 'revoked'
