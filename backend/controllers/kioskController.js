@@ -440,6 +440,13 @@ exports.identifyFace = async (req, res) => {
     if (!business?.faceAttendanceEnabled) {
       return res.status(403).json({ success: false, code: 'FACE_ATTENDANCE_DISABLED', message: 'Face attendance is disabled for this gym.' });
     }
+    if (!config.biometricTemplateKeyConfigured) {
+      return res.status(503).json({
+        success: false,
+        code: 'BIOMETRIC_ENCRYPTION_UNAVAILABLE',
+        message: 'Face recognition is temporarily unavailable. Please contact gym staff.'
+      });
+    }
     const records = await BiometricCredential.find({
       tenantId: req.kiosk.tenantId,
       businessId: req.kiosk.businessId,

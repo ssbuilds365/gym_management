@@ -91,6 +91,11 @@ const startServer = async () => {
         '[config] KIOSK_TOKEN_SECRET is missing or shorter than 32 characters; attendance kiosk authorization is disabled.'
       );
     }
+    if (!config.biometricTemplateKeyConfigured) {
+      console.warn(
+        '[config] BIOMETRIC_TEMPLATE_KEY is missing or is not a Base64-encoded 32-byte key; face enrollment and identification are unavailable.'
+      );
+    }
 
     app.listen(config.port, () => {
       console.log(`Server running on port ${config.port}`);

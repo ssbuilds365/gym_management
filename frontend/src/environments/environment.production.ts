@@ -4,7 +4,7 @@ export const environment = {
   appVersion: '1.0.0',
   frontendUrl: 'https://gym-management-chi-three.vercel.app',
   backendUrl: 'https://gym-management-llv3.onrender.com',
-  apiUrl: '/api',
+  apiUrl: 'https://gym-management-llv3.onrender.com/api',
   razorpayKeyId: '',
   cloudinary: {
     cloudName: '',
