@@ -117,13 +117,13 @@
           <small>Member ID: {{ selfMember.displayId || 'Available at gym desk' }}</small>
         </div>
         <label class="self-consent">
-          <input type="checkbox" [(ngModel)]="selfConsent" name="selfConsent">
+          <input type="checkbox" [(ngModel)]="selfConsent" name="selfConsent" [disabled]="selfEnrollmentLoading || !!selfEnrollmentSuccess">
           I consent to storing a secure face recognition template for gym attendance. Templates may be deleted through gym staff or the member deletion process.
         </label>
         <div class="enrollment-camera" *ngIf="enrollmentCameraActive">
           <video #enrollmentVideo autoplay muted playsinline></video>
           <div class="enrollment-face-guide" aria-hidden="true"></div>
-          <p>Position your face inside the frame</p>
+          <p>{{ selfEnrollmentStage || 'Position your face inside the frame.' }}</p>
         </div>
         <p class="auth-error" *ngIf="selfEnrollmentError" role="alert">{{ selfEnrollmentError }}</p>
         <div class="self-enrollment-success" *ngIf="selfEnrollmentSuccess" role="status">
@@ -139,9 +139,10 @@
           </button>
           <button type="button" class="primary-action" *ngIf="enrollmentCameraActive"
             (click)="captureSelfEnrollment()" [disabled]="!selfConsent || selfEnrollmentLoading">
-            {{ selfEnrollmentLoading ? 'Registering…' : 'Capture & Register' }}
+            {{ selfEnrollmentLoading ? selfEnrollmentStage : selfEnrollmentError ? 'Retry Capture' : 'Capture & Register' }}
           </button>
-          <button type="button" class="secondary-action" (click)="closeSelfRegistration()">Cancel</button>
+          <button type="button" class="secondary-action" *ngIf="!selfEnrollmentSuccess"
+            (click)="closeSelfRegistration()" [disabled]="selfEnrollmentLoading">Cancel</button>
         </div>
       </ng-container>
     </section>

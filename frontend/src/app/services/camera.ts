@@ -27,6 +27,24 @@ export class CameraService {
     return this.stream;
   }
 
+  get hasActiveStream(): boolean {
+    return Boolean(this.stream?.getVideoTracks().some(track => track.readyState === 'live'));
+  }
+
+  async attach(video: HTMLVideoElement): Promise<MediaStream> {
+    if (!this.hasActiveStream || !this.stream) {
+      throw new CameraError('NOT_READABLE', 'No active camera stream is available.');
+    }
+    video.srcObject = this.stream;
+    await this.waitForMetadata(video);
+    await video.play();
+    return this.stream;
+  }
+
+  detach(video: HTMLVideoElement): void {
+    if (video.srcObject === this.stream) video.srcObject = null;
+  }
+
   async open(
     video: HTMLVideoElement,
     preferredFacingMode: 'user' | 'environment' = 'user'

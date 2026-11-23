@@ -9,7 +9,7 @@ const Attendance = require('../models/Attendance');
 const KioskCredential = require('../models/KioskCredential');
 const KioskSession = require('../models/KioskSession');
 const BiometricCredential = require('../models/BiometricCredential');
-const { decryptTemplate } = require('../utils/biometricTemplateEncryption');
+const { encryptTemplate, decryptTemplate } = require('../utils/biometricTemplateEncryption');
 const { signKioskToken, KIOSK_TOKEN_SECRET } = require('../middleware/kioskAuthMiddleware');
 const { verifyKioskSecret } = require('../utils/kioskCredentialSecret');
 const config = require('../config/env');
@@ -130,6 +130,7 @@ exports.identifyMemberForEnrollment = async (req, res) => {
 };
 
 exports.enrollMemberFace = async (req, res) => {
+  let stage = 'validation';
   try {
     const descriptor = req.body?.descriptor;
     const enrollmentToken = String(req.body?.enrollmentToken || '');
@@ -179,11 +180,20 @@ exports.enrollMemberFace = async (req, res) => {
     if (existing) {
       return res.status(409).json({ success: false, code: 'FACE_ALREADY_REGISTERED', message: 'Face Already Registered' });
     }
+    if (!config.biometricTemplateKeyConfigured) {
+      return res.status(503).json({
+        success: false,
+        code: 'BIOMETRIC_ENCRYPTION_UNAVAILABLE',
+        message: 'Face registration is temporarily unavailable. Please contact gym staff.'
+      });
+    }
+    stage = 'encryption';
     const encryptedTemplate = encryptTemplate({
       descriptor,
       modelVersion: 'face-api.js-v1-128d'
     });
-    await BiometricCredential.create({
+    stage = 'persistence';
+    const savedCredential = await BiometricCredential.create({
       tenantId: req.kiosk.tenantId,
       businessId: req.kiosk.businessId,
       memberId: member._id,
@@ -197,14 +207,50 @@ exports.enrollMemberFace = async (req, res) => {
       registeredAt: new Date(),
       createdBy: req.kiosk.createdBy || null
     });
+    if (!savedCredential?._id) {
+      return res.status(500).json({
+        success: false,
+        code: 'BIOMETRIC_SAVE_FAILED',
+        message: 'Face registration could not be saved. Please retry or contact gym staff.'
+      });
+    }
     return res.status(201).json({
       success: true,
       code: 'FACE_REGISTERED',
       message: 'FACE REGISTERED SUCCESSFULLY'
     });
   } catch (error) {
-    console.error('Kiosk face enrollment error:', error.message);
-    return res.status(500).json({ success: false, message: 'Unable to save face registration.' });
+    const duplicate = error?.code === 11000;
+    const invalid = error?.name === 'ValidationError' || error?.name === 'CastError';
+    const safeMessage = String(error?.message || 'Unknown error')
+      .replace(/mongodb(?:\+srv)?:\/\/[^\s'"]+/gi, '[redacted MongoDB URI]')
+      .replace(/[A-Za-z0-9_-]{80,}/g, '[redacted long value]')
+      .slice(0, 240);
+    console.error('Kiosk face enrollment failed:', {
+      stage,
+      name: error?.name || 'Error',
+      code: error?.code || null,
+      message: safeMessage
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        code: 'FACE_ALREADY_REGISTERED',
+        message: 'Face Already Registered'
+      });
+    }
+    if (invalid) {
+      return res.status(400).json({
+        success: false,
+        code: 'BIOMETRIC_VALIDATION_FAILED',
+        message: 'Face registration details were invalid. Please retry or contact gym staff.'
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      code: 'BIOMETRIC_SAVE_FAILED',
+      message: 'Face registration could not be saved. Please retry or contact gym staff.'
+    });
   }
 };
 

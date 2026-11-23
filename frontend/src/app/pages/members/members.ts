@@ -20,6 +20,7 @@ import * as QRCode from 'qrcode';
 import { PaymentService } from '../../services/payment';
 import { DashboardService } from '../../services/dashboard';
 import { CameraService, CameraError } from '../../services/camera';
+import { FaceRecognitionService } from '../../services/face-recognition';
 import { jsPDF } from 'jspdf';
 import { environment } from '../../../environments/environment';
 import {
@@ -188,6 +189,7 @@ totalDueAmount = 0;
     private paymentService: PaymentService,
     private dashboardService: DashboardService,
     private cameraService: CameraService,
+    private faceRecognition: FaceRecognitionService,
     private changeDetector: ChangeDetectorRef
   ) {}
 
@@ -1285,42 +1287,30 @@ totalDueAmount = 0;
     this.faceEnrollmentError = '';
     this.faceEnrollmentMessage = 'Position one face in the guide. Capturing 3 samples…';
     try {
-      const faceApi = await import('face-api.js');
-      await Promise.all([
-        faceApi.nets.tinyFaceDetector.loadFromUri('/models'),
-        faceApi.nets.faceLandmark68Net.loadFromUri('/models'),
-        faceApi.nets.faceRecognitionNet.loadFromUri('/models')
-      ]);
+      await this.faceRecognition.load();
       const video = this.faceVideo?.nativeElement;
       if (!video) throw new Error('Camera preview is unavailable.');
 
       const samples: number[][] = [];
+      let previousBox: { x: number; y: number; width: number; height: number } | null = null;
       const sampleCount = 3;
       for (let index = 0; index < sampleCount; index += 1) {
         if (this.selectedMemberId !== memberId || !this.faceCameraActive) {
           throw new Error('Face capture was cancelled.');
         }
-        const detections = await faceApi
-          .detectAllFaces(
-            video,
-            new faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.6 })
-          )
-          .withFaceLandmarks()
-          .withFaceDescriptors();
-        if (detections.length !== 1) {
-          throw new Error(detections.length === 0
-            ? 'No face was detected. Position the member directly in the camera guide.'
-            : 'More than one face is visible. Ensure only the selected member is in view.');
+        const capture = await this.faceRecognition.detectOneDescriptor(video);
+        if (
+          previousBox &&
+          !this.faceRecognition.isStable(previousBox, capture.box, video.videoWidth, video.videoHeight)
+        ) {
+          throw new Error('Keep the member centered and still inside the camera guide, then retry.');
         }
-        const descriptor = Array.from(detections[0].descriptor);
-        if (descriptor.length !== 128 || descriptor.some(value => !Number.isFinite(value))) {
-          throw new Error('The face recognition model returned an invalid template.');
-        }
-        samples.push(descriptor);
+        previousBox = capture.box;
+        samples.push(capture.descriptor);
         this.faceEnrollmentMessage = `Face sample ${index + 1} of ${sampleCount} captured. Keep the member centered.`;
         this.changeDetector.markForCheck();
         if (index + 1 < sampleCount) {
-          await new Promise(resolve => setTimeout(resolve, 350));
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         }
       }
 

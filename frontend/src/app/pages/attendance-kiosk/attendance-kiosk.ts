@@ -6,6 +6,7 @@ import { ActivatedRoute } from '@angular/router';
 import { finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { CameraError, CameraService } from '../../services/camera';
+import { FaceRecognitionError, FaceRecognitionService } from '../../services/face-recognition';
 
 type KioskResult = {
   type: 'success' | 'expired' | 'duplicate' | 'not-found' | 'camera' | 'error';
@@ -56,6 +57,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   selfEnrollmentError = '';
   selfEnrollmentLoading = false;
   selfEnrollmentSuccess = '';
+  selfEnrollmentStage = '';
   enrollmentCameraActive = false;
   scanning = false;
   modelsLoading = false;
@@ -64,8 +66,9 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   accessDenied = false;
   networkOnline = navigator.onLine;
 
-  private faceApi: any = null;
   private modelsLoaded = false;
+  private enrollmentOwnsCamera = false;
+  private previousScanFaceBox: { x: number; y: number; width: number; height: number } | null = null;
   private wakeLock: any = null;
   private kioskRenewTimer: ReturnType<typeof setInterval> | null = null;
   private continuousScanTimer: ReturnType<typeof setInterval> | null = null;
@@ -77,6 +80,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     private readonly http: HttpClient,
     private readonly route: ActivatedRoute,
     private readonly cameraService: CameraService,
+    private readonly faceRecognition: FaceRecognitionService,
     private readonly changeDetector: ChangeDetectorRef
   ) {}
 
@@ -203,8 +207,10 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.selfMember = null;
     this.selfEnrollmentToken = '';
     this.selfConsent = false;
+    this.selfEnrollmentStage = '';
     this.selfEnrollmentError = '';
     this.selfEnrollmentSuccess = '';
+    this.selfEnrollmentStage = '';
     this.changeDetector.markForCheck();
   }
 
@@ -254,7 +260,13 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     await Promise.resolve();
     try {
       if (!this.enrollmentVideoRef) throw new Error('Camera preview could not be rendered.');
-      await this.cameraService.open(this.enrollmentVideoRef.nativeElement, 'user');
+      this.enrollmentOwnsCamera = !this.cameraService.hasActiveStream;
+      if (this.enrollmentOwnsCamera) {
+        await this.cameraService.open(this.enrollmentVideoRef.nativeElement, 'user');
+      } else {
+        await this.cameraService.attach(this.enrollmentVideoRef.nativeElement);
+      }
+      this.selfEnrollmentStage = 'Camera Ready';
     } catch (error: any) {
       this.stopEnrollmentCamera();
       this.selfEnrollmentError = error instanceof CameraError
@@ -271,37 +283,47 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       !this.selfConsent ||
       !this.enrollmentCameraActive
     ) return;
+    const totalStartedAt = performance.now();
+    let modelLoadMs = 0;
+    let captureMs = 0;
+    let saveMs = 0;
     this.selfEnrollmentLoading = true;
     this.selfEnrollmentError = '';
+    this.selfEnrollmentStage = 'Capturing face...';
+    this.changeDetector.markForCheck();
     try {
-      const faceApi = await import('face-api.js');
-      await Promise.all([
-        faceApi.nets.tinyFaceDetector.loadFromUri('/models'),
-        faceApi.nets.faceLandmark68Net.loadFromUri('/models'),
-        faceApi.nets.faceRecognitionNet.loadFromUri('/models')
-      ]);
+      const modelStartedAt = performance.now();
+      await this.loadFaceModels(false);
+      modelLoadMs = performance.now() - modelStartedAt;
+      if (!this.modelsLoaded) throw new Error('Face recognition models could not be loaded. Check the connection and retry.');
       const video = this.enrollmentVideoRef?.nativeElement;
       if (!video) throw new Error('Camera preview is unavailable.');
       const samples: number[][] = [];
+      let previousBox: { x: number; y: number; width: number; height: number } | null = null;
+      const captureStartedAt = performance.now();
       for (let index = 0; index < 3; index += 1) {
-        const detections = await faceApi
-          .detectAllFaces(video, new faceApi.TinyFaceDetectorOptions({
-            inputSize: 320,
-            scoreThreshold: 0.6
-          }))
-          .withFaceLandmarks()
-          .withFaceDescriptors();
-        if (detections.length !== 1) {
-          throw new Error(detections.length === 0
-            ? 'No face was detected. Position yourself in the guide.'
-            : 'More than one face is visible. Ensure only you are in view.');
+        const capture = await this.faceRecognition.detectOneDescriptor(video);
+        if (
+          previousBox &&
+          !this.faceRecognition.isStable(previousBox, capture.box, video.videoWidth, video.videoHeight)
+        ) {
+          throw new FaceRecognitionError('NO_FACE', 'Hold your face steady inside the guide and retry.');
         }
-        samples.push(Array.from(detections[0].descriptor));
-        if (index < 2) await new Promise(resolve => setTimeout(resolve, 350));
+        previousBox = capture.box;
+        samples.push(capture.descriptor);
+        this.selfEnrollmentStage = 'Face detected · Capturing samples...';
+        this.changeDetector.markForCheck();
+        if (index < 2) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       }
+      captureMs = performance.now() - captureStartedAt;
+      this.selfEnrollmentStage = 'Generating secure face template...';
+      this.changeDetector.markForCheck();
       const descriptor = samples[0].map((_, index) =>
         samples.reduce((sum, sample) => sum + sample[index], 0) / samples.length
       );
+      this.selfEnrollmentStage = 'Saving your registration...';
+      this.changeDetector.markForCheck();
+      const saveStartedAt = performance.now();
       const response = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/enrollment/face`,
         {
@@ -311,26 +333,63 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         },
         { headers: this.kioskHeaders() }
       ).toPromise();
+      saveMs = performance.now() - saveStartedAt;
       if (response?.success !== true) {
         throw new Error(response?.message || 'Unable to register face.');
       }
       this.selfEnrollmentSuccess = 'FACE REGISTERED SUCCESSFULLY';
+      this.selfEnrollmentStage = 'Face Registered Successfully';
       this.stopEnrollmentCamera();
-      window.setTimeout(() => this.closeSelfRegistration(), 1800);
     } catch (error: any) {
-      this.selfEnrollmentError = error.error?.message || error?.message || 'Unable to register face.';
+      this.selfEnrollmentError = this.getEnrollmentErrorMessage(error);
+      this.selfEnrollmentStage = this.enrollmentCameraActive ? 'Camera Ready · Retry capture when ready.' : '';
     } finally {
       this.selfEnrollmentLoading = false;
+      this.logPerformance('face-enrollment', {
+        modelLoadMs,
+        captureAndTemplateMs: captureMs,
+        saveMs,
+        totalMs: performance.now() - totalStartedAt
+      });
       this.changeDetector.markForCheck();
     }
   }
 
   private stopEnrollmentCamera(): void {
-    this.cameraService.stop();
     if (this.enrollmentVideoRef?.nativeElement) {
-      this.enrollmentVideoRef.nativeElement.srcObject = null;
+      if (this.enrollmentOwnsCamera) this.cameraService.stop();
+      else this.cameraService.detach(this.enrollmentVideoRef.nativeElement);
     }
+    this.enrollmentOwnsCamera = false;
     this.enrollmentCameraActive = false;
+  }
+
+  private getEnrollmentErrorMessage(error: any): string {
+    const code = error?.error?.code;
+    if (error instanceof FaceRecognitionError) return error.message;
+    if (error?.status === 0) return 'Network connection failed. Check the connection and retry.';
+    if (error?.status === 401 || code === 'ENROLLMENT_TOKEN_INVALID') {
+      return 'Enrollment authorization expired. Verify the member again and retry.';
+    }
+    if (code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE') {
+      return 'Face registration is not configured on the server. Please contact gym staff.';
+    }
+    if (code === 'FACE_ALREADY_REGISTERED') return 'This member already has a registered face. Ask gym staff to update it.';
+    if (code === 'MEMBER_NOT_FOUND') return 'Member not found or no longer active. Verify the member details and retry.';
+    if (code === 'CONSENT_REQUIRED') return 'Consent is required before registering a face.';
+    if (code === 'INVALID_FACE_DESCRIPTOR') return 'Face template validation failed. Reposition the face and retry.';
+    if (code === 'BIOMETRIC_VALIDATION_FAILED') return 'Face registration details were invalid. Please retry.';
+    if (code === 'BIOMETRIC_SAVE_FAILED') return 'The server could not save the face template. Please retry or contact gym staff.';
+    return error?.error?.message || error?.message || 'Unable to register face. Please retry.';
+  }
+
+  private logPerformance(
+    phase: string,
+    timings: Record<string, number>
+  ): void {
+    if (!environment.production) {
+      console.debug(`[kiosk-performance] ${phase}`, timings);
+    }
   }
 
   private startRenewalTimer(): void {
@@ -409,20 +468,26 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
 
   async startFaceScan(): Promise<void> {
     if (!this.authorized || !this.faceEnabled || this.scanning) return;
+    const scanStartedAt = performance.now();
     this.result = null;
     this.cameraError = '';
     this.scanning = true;
-    await this.startCamera();
-    if (!this.cameraActive) {
+    try {
+      await this.startCamera();
+      if (!this.cameraActive) {
+        this.scanning = false;
+        return;
+      }
+      await this.loadFaceModels();
+      if (!this.modelsLoaded) {
+        this.scanning = false;
+        return;
+      }
+      await this.captureAndIdentify();
+    } finally {
       this.scanning = false;
-      return;
+      this.logPerformance('face-scan-total', { totalMs: performance.now() - scanStartedAt });
     }
-    await this.loadFaceModels();
-    if (!this.modelsLoaded) {
-      this.scanning = false;
-      return;
-    }
-    await this.captureAndIdentify();
   }
 
   private async startCamera(): Promise<void> {
@@ -472,7 +537,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       ) {
         void this.captureContinuousFace();
       }
-    }, 3000);
+    }, 700);
   }
 
   private async captureContinuousFace(): Promise<void> {
@@ -480,21 +545,36 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.continuousScanInProgress = true;
     try {
       const video = this.videoRef?.nativeElement;
-      if (!video || !this.faceApi) return;
-      const detections = await this.faceApi
-        .detectAllFaces(video, new this.faceApi.TinyFaceDetectorOptions({
-          inputSize: 320,
-          scoreThreshold: 0.6
-        }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-      if (detections.length !== 1) return;
-      const descriptor = Array.from(detections[0].descriptor as Float32Array);
+      if (!video || !this.modelsLoaded) return;
+      const box = await this.faceRecognition.detectSingleFace(video);
+      if (!box) {
+        this.previousScanFaceBox = null;
+        return;
+      }
+      if (
+        !this.previousScanFaceBox ||
+        !this.faceRecognition.isStable(
+          this.previousScanFaceBox,
+          box,
+          video.videoWidth,
+          video.videoHeight
+        )
+      ) {
+        this.previousScanFaceBox = box;
+        return;
+      }
+      this.previousScanFaceBox = null;
+      const descriptorStartedAt = performance.now();
+      const { descriptor } = await this.faceRecognition.detectOneDescriptor(video);
+      const descriptorMs = performance.now() - descriptorStartedAt;
+      const identifyStartedAt = performance.now();
       const identify = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/face/identify`,
         { descriptor },
         { headers: this.kioskHeaders() }
       ).toPromise();
+      const identifyMs = performance.now() - identifyStartedAt;
+      this.logPerformance('continuous-face-recognition', { descriptorMs, identifyMs });
       if (!identify?.success || !identify.matchToken) return;
       await this.checkIn(identify.member.id, identify.matchToken);
       this.recognitionCooldownUntil = Date.now() + 7000;
@@ -517,20 +597,19 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     }
   }
 
-  private async loadFaceModels(): Promise<void> {
+  private async loadFaceModels(showCameraError = true): Promise<void> {
     if (this.modelsLoaded) return;
     this.modelsLoading = true;
     this.faceStatus = 'Loading face recognition model...';
     try {
-      this.faceApi = await import('face-api.js');
-      await Promise.all([
-        this.faceApi.nets.tinyFaceDetector.loadFromUri('/models'),
-        this.faceApi.nets.faceLandmark68Net.loadFromUri('/models'),
-        this.faceApi.nets.faceRecognitionNet.loadFromUri('/models')
-      ]);
+      await this.faceRecognition.load();
       this.modelsLoaded = true;
     } catch (error) {
-      this.showCameraError('Face recognition models could not be loaded. Check the connection and retry.');
+      const message = error instanceof FaceRecognitionError
+        ? error.message
+        : 'Face recognition models could not be loaded. Check the connection and retry.';
+      if (showCameraError) this.showCameraError(message);
+      else this.faceStatus = message;
     } finally {
       this.modelsLoading = false;
     }
@@ -541,11 +620,12 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     if (!video) return;
     this.faceStatus = 'Verifying identity...';
     try {
-      const detected = await this.faceApi
-        .detectSingleFace(video, new this.faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.6 }))
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      if (!detected) {
+      let descriptor: number[];
+      const descriptorStartedAt = performance.now();
+      try {
+        descriptor = await this.faceRecognition.descriptorFromStableFace(video);
+      } catch (error) {
+        if (!(error instanceof FaceRecognitionError) || error.code !== 'NO_FACE') throw error;
         this.showResult({
           type: 'not-found',
           title: 'Face not detected',
@@ -554,12 +634,15 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.scanning = false;
         return;
       }
-      const descriptor = Array.from(detected.descriptor as Float32Array);
+      const descriptorMs = performance.now() - descriptorStartedAt;
+      const identifyStartedAt = performance.now();
       const identify = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/face/identify`,
         { descriptor },
         { headers: this.kioskHeaders() }
       ).toPromise();
+      const identifyMs = performance.now() - identifyStartedAt;
+      this.logPerformance('face-recognition', { descriptorMs, identifyMs });
       if (!identify?.success) throw new Error(identify?.message || 'Member not recognized');
       if (!identify.matchToken) throw new Error('The server did not return a face-match proof.');
       await this.checkIn(identify.member.id, identify.matchToken);
@@ -593,6 +676,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   private async checkIn(memberId: string, matchToken: string): Promise<void> {
+    const startedAt = performance.now();
     const idempotencyKey = crypto.randomUUID();
     try {
       const response = await this.http.post<any>(
@@ -649,6 +733,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
           message: error?.error?.message || 'Unable to mark attendance.'
         });
       }
+    } finally {
+      this.logPerformance('attendance-check-in', { serverRoundTripMs: performance.now() - startedAt });
     }
   }
 
