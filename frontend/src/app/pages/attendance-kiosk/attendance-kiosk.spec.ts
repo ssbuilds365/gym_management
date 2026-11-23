@@ -56,6 +56,7 @@ describe('AttendanceKiosk authorization', () => {
       gym: {
         name: 'Test Gym',
         faceAttendanceEnabled: true,
+        faceEnrollmentEnabled: true,
         qrAttendanceEnabled: true
       }
     });
@@ -63,6 +64,7 @@ describe('AttendanceKiosk authorization', () => {
 
     expect(component.authenticating).toBe(false);
     expect(component.authorized).toBe(true);
+    expect(component.faceEnrollmentEnabled).toBe(true);
     expect(component.kioskSecret).toBe('');
     expect(sessionStorage.getItem('ssfm_kiosk_token')).toBe('short-lived-token');
     expect(fixture.nativeElement.querySelector('.authorization')).toBeNull();
@@ -106,6 +108,63 @@ describe('AttendanceKiosk authorization', () => {
 
     expect(fixture.componentInstance.authorized).toBe(true);
     expect(fixture.nativeElement.querySelector('.kiosk-home')).not.toBeNull();
+  });
+
+  it('disables face enrollment when the backend reports unavailable while retaining QR attendance', async () => {
+    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
+    fixture.detectChanges();
+
+    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
+    request.flush({
+      success: true,
+      gym: {
+        name: 'Test Gym',
+        faceAttendanceEnabled: false,
+        faceEnrollmentEnabled: false,
+        qrAttendanceEnabled: true
+      }
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const registerButton = fixture.nativeElement.querySelector('.face-register-action') as HTMLButtonElement;
+    expect(registerButton.disabled).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain(
+      'Face registration is temporarily unavailable. Please contact gym staff.'
+    );
+    expect(fixture.componentInstance.qrEnabled).toBe(true);
+  });
+
+  it('requires staff to enroll kiosk members and maps duplicate responses safely', async () => {
+    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
+    fixture.detectChanges();
+
+    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
+    request.flush({
+      success: true,
+      gym: {
+        name: 'Test Gym',
+        faceAttendanceEnabled: true,
+        faceEnrollmentEnabled: false,
+        faceEnrollmentRequiresStaff: true,
+        qrAttendanceEnabled: true
+      }
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.faceEnrollmentEnabled).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain(
+      'Face registration must be completed by gym staff after verifying the member.'
+    );
+    const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
+      error: { code: 'DUPLICATE_FACE_DETECTED', message: 'internal detail' },
+      status: 409
+    });
+    expect(message).toBe(
+      'This face is already registered with another member. Please contact gym staff.'
+    );
+    expect(message).not.toContain('internal detail');
   });
 
   it('clears an expired stored token and asks for reauthorization', async () => {

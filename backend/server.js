@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const config = require('./config/env');
 const connectDB = require('./config/db');
 const { startAttendanceAutoCheckout } = require('./services/attendanceAutoCheckout');
+const { initializeFaceRecognition } = require('./services/faceRecognition');
 
 const dns = require('node:dns');
 const { buildCorsOptions } = require('./utils/corsConfig');
@@ -86,6 +87,7 @@ const startServer = async () => {
   try {
     await connectDB();
     await startAttendanceAutoCheckout();
+    await initializeFaceRecognition();
     if (!config.kioskTokenSecretConfigured) {
       console.warn(
         '[config] KIOSK_TOKEN_SECRET is missing or shorter than 32 characters; attendance kiosk authorization is disabled.'

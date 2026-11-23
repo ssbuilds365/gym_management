@@ -20,7 +20,7 @@ import * as QRCode from 'qrcode';
 import { PaymentService } from '../../services/payment';
 import { DashboardService } from '../../services/dashboard';
 import { CameraService, CameraError } from '../../services/camera';
-import { FaceRecognitionService } from '../../services/face-recognition';
+import { FaceRecognitionError, FaceRecognitionService } from '../../services/face-recognition';
 import { jsPDF } from 'jspdf';
 import { environment } from '../../../environments/environment';
 import {
@@ -46,7 +46,7 @@ import {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './members.html',
-  styleUrl: './members.scss'
+  styleUrls: ['./members.scss', './members-biometric.scss']
 })
 export class Members implements OnInit, OnChanges, OnDestroy {
   readonly appName = environment.appName;
@@ -94,6 +94,9 @@ export class Members implements OnInit, OnChanges, OnDestroy {
   errorMessage = '';
   successMessage = '';
   biometricActionError = '';
+  faceDuplicateAuditLoading = false;
+  faceDuplicateAuditError = '';
+  faceDuplicateAuditReport: { status: string; groups: Array<{ memberIds: string[]; status: string }> } | null = null;
   deletingMemberId = '';
   showImportModal = false;
   showImportHistory = false;
@@ -158,8 +161,10 @@ faceEnrollmentLoading = false;
 faceEnrollmentError = '';
 faceEnrollmentMessage = '';
 faceConsentGranted = false;
+faceReplacementAuthorized = false;
 faceCameraActive = false;
 faceRemovingMemberId = '';
+private previousFaceCameraBodyOverflow: string | null = null;
 private faceStatusRequestSequence = 0;
 private readonly faceStatusRequestIds = new Map<string, number>();
 
@@ -1139,6 +1144,7 @@ totalDueAmount = 0;
     this.isEditMode = false;
     this.selectedMemberId = '';
     this.faceConsentGranted = false;
+    this.faceReplacementAuthorized = false;
     this.faceStatus = 'NotRegistered';
     this.faceRegisteredAt = null;
     this.faceEnrollmentError = '';
@@ -1155,6 +1161,7 @@ totalDueAmount = 0;
     this.isEditMode = true;
     this.selectedMemberId = member._id;
     this.faceConsentGranted = false;
+    this.faceReplacementAuthorized = false;
     this.faceStatus = 'NotRegistered';
     this.faceRegisteredAt = null;
     this.faceEnrollmentError = '';
@@ -1199,6 +1206,33 @@ totalDueAmount = 0;
     this.requestFaceStatus(memberId, true);
   }
 
+  auditFaceDuplicates(): void {
+    if (this.faceDuplicateAuditLoading) return;
+    this.faceDuplicateAuditLoading = true;
+    this.faceDuplicateAuditError = '';
+    this.memberService.getFaceDuplicateReport().pipe(
+      finalize(() => {
+        this.faceDuplicateAuditLoading = false;
+        this.changeDetector.markForCheck();
+      })
+    ).subscribe({
+      next: report => {
+        this.faceDuplicateAuditReport = {
+          status: report?.status === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'NO_DUPLICATES_FOUND',
+          groups: Array.isArray(report?.groups)
+            ? report.groups.filter((group: any) =>
+              Array.isArray(group?.memberIds) &&
+              group.memberIds.every((id: unknown) => typeof id === 'string')
+            )
+            : []
+        };
+      },
+      error: () => {
+        this.faceDuplicateAuditError = 'Unable to audit face registrations. Please retry.';
+      }
+    });
+  }
+
   private requestFaceStatus(memberId: string, updateForm: boolean): void {
     const requestId = ++this.faceStatusRequestSequence;
     this.faceStatusRequestIds.set(memberId, requestId);
@@ -1240,11 +1274,11 @@ totalDueAmount = 0;
         if (member) {
           member.biometricStatusLoading = false;
           member.biometricStatus = 'Unavailable';
-          member.biometricStatusError = error.error?.message || 'Unable to load face registration status.';
+          member.biometricStatusError = 'Unable to load face registration status.';
         }
         if (updateForm && this.selectedMemberId === memberId) {
           this.faceStatus = 'Unavailable';
-          this.faceEnrollmentError = error.error?.message || 'Unable to load face registration status.';
+          this.faceEnrollmentError = 'Unable to load face registration status.';
         }
         this.changeDetector.markForCheck();
       }
@@ -1252,6 +1286,7 @@ totalDueAmount = 0;
   }
 
   async startFaceEnrollment(): Promise<void> {
+    if (this.faceCameraActive || this.faceEnrollmentLoading) return;
     if (!this.selectedMemberId || !this.faceConsentGranted) {
       this.faceEnrollmentError = 'Verify the member identity and obtain informed consent before enrollment.';
       return;
@@ -1260,16 +1295,23 @@ totalDueAmount = 0;
       this.faceEnrollmentError = 'Camera access requires HTTPS and a supported browser.';
       return;
     }
+    this.faceReplacementAuthorized = this.faceStatus === 'Registered';
+    if (
+      this.faceReplacementAuthorized &&
+      !confirm('Replace this member\'s current face template? The old template will be revoked after the new template passes verification.')
+    ) {
+      this.faceReplacementAuthorized = false;
+      return;
+    }
     this.faceEnrollmentError = '';
     this.faceEnrollmentMessage = '';
+    this.faceCameraActive = true;
+    this.lockFaceCameraScroll();
+    this.changeDetector.detectChanges();
     try {
-      if (!this.faceVideo) {
-        this.faceCameraActive = true;
-        this.changeDetector.detectChanges();
-      }
       if (!this.faceVideo) throw new Error('Camera preview could not be rendered.');
       await this.cameraService.open(this.faceVideo.nativeElement, 'user');
-      this.faceCameraActive = true;
+      this.faceEnrollmentMessage = 'Camera Ready · Position your face in the preview and keep still.';
       this.changeDetector.detectChanges();
     } catch (error: any) {
       this.stopFaceCamera();
@@ -1291,22 +1333,25 @@ totalDueAmount = 0;
       const video = this.faceVideo?.nativeElement;
       if (!video) throw new Error('Camera preview is unavailable.');
 
-      const samples: number[][] = [];
+      const samples: string[] = [];
       let previousBox: { x: number; y: number; width: number; height: number } | null = null;
       const sampleCount = 3;
       for (let index = 0; index < sampleCount; index += 1) {
         if (this.selectedMemberId !== memberId || !this.faceCameraActive) {
           throw new Error('Face capture was cancelled.');
         }
-        const capture = await this.faceRecognition.detectOneDescriptor(video);
+        const box = await this.faceRecognition.detectSingleFace(video);
+        if (!box) {
+          throw new FaceRecognitionError('NO_FACE', 'Position one face inside the guide and hold still.');
+        }
         if (
           previousBox &&
-          !this.faceRecognition.isStable(previousBox, capture.box, video.videoWidth, video.videoHeight)
+          !this.faceRecognition.isStable(previousBox, box, video.videoWidth, video.videoHeight)
         ) {
           throw new Error('Keep the member centered and still inside the camera guide, then retry.');
         }
-        previousBox = capture.box;
-        samples.push(capture.descriptor);
+        previousBox = box;
+        samples.push(this.faceRecognition.captureImage(video));
         this.faceEnrollmentMessage = `Face sample ${index + 1} of ${sampleCount} captured. Keep the member centered.`;
         this.changeDetector.markForCheck();
         if (index + 1 < sampleCount) {
@@ -1314,22 +1359,23 @@ totalDueAmount = 0;
         }
       }
 
-      const descriptor = samples[0].map((_, index) =>
-        samples.reduce((sum, sample) => sum + sample[index], 0) / samples.length
-      );
+      this.faceEnrollmentMessage = 'Three samples captured · Processing securely…';
+      this.changeDetector.markForCheck();
       const response = await firstValueFrom(this.memberService.registerFace(
         memberId,
-        descriptor,
-        'face-biometric-consent-v1'
+        samples,
+        'face-biometric-consent-v2',
+        this.faceReplacementAuthorized
       ));
       if (response?.success !== true) {
         throw new Error(response?.message || 'Unable to save face registration.');
       }
       this.faceEnrollmentMessage = response.message || 'Face registration saved securely.';
+      this.faceReplacementAuthorized = false;
       this.stopFaceCamera();
       this.requestFaceStatus(memberId, true);
     } catch (error: any) {
-      this.faceEnrollmentError = error?.error?.message || error?.message || 'Unable to capture face.';
+      this.faceEnrollmentError = this.getBiometricErrorMessage(error);
     } finally {
       this.faceEnrollmentLoading = false;
       this.changeDetector.markForCheck();
@@ -1362,7 +1408,7 @@ totalDueAmount = 0;
         this.requestFaceStatus(memberId, this.selectedMemberId === memberId);
       },
       error: error => {
-        const message = error.error?.message || 'Unable to remove face registration.';
+        const message = this.getBiometricErrorMessage(error);
         if (this.selectedMemberId === memberId) this.faceEnrollmentError = message;
         else this.biometricActionError = message;
       }
@@ -1377,11 +1423,60 @@ totalDueAmount = 0;
     });
   }
 
+  private getBiometricErrorMessage(error: any): string {
+    const code = error?.error?.code;
+    if (code === 'DUPLICATE_FACE_DETECTED') {
+      return 'This face is already registered with another member. Please contact gym staff.';
+    }
+    if (code === 'FACE_ALREADY_REGISTERED') {
+      return 'This member already has a registered face. Confirm an authorized replacement to continue.';
+    }
+    if (code === 'MEMBER_NOT_FOUND') return 'Member not found.';
+    if (
+      code === 'INVALID_FACE_DESCRIPTOR' ||
+      code === 'INVALID_FACE_IMAGE' ||
+      code === 'INVALID_FACE_IMAGES' ||
+      code === 'INVALID_FACE_TEMPLATE' ||
+      code === 'NO_FACE' ||
+      code === 'MULTIPLE_FACES' ||
+      code === 'FACE_TOO_SMALL' ||
+      code === 'INCOMPATIBLE_FACE_MODEL'
+    ) {
+      return 'Unable to process face. Please try again.';
+    }
+    if (
+      code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE' ||
+      code === 'BIOMETRIC_RECOGNITION_UNAVAILABLE' ||
+      code === 'BIOMETRIC_TRANSACTION_REQUIRED' ||
+      code === 'BIOMETRIC_TEMPLATE_UNAVAILABLE' ||
+      code === 'BIOMETRIC_SERVICE_UNAVAILABLE' ||
+      error?.status === 0 ||
+      error?.status >= 500
+    ) {
+      return 'Biometric service is temporarily unavailable. Please contact gym staff.';
+    }
+    return 'Unable to save face registration. Please retry.';
+  }
+
   stopFaceCamera(): void {
     this.cameraService.stop();
     if (this.faceVideo?.nativeElement) this.faceVideo.nativeElement.srcObject = null;
     this.faceCameraActive = false;
+    this.faceReplacementAuthorized = false;
+    this.restoreFaceCameraScroll();
     this.changeDetector.markForCheck();
+  }
+
+  private lockFaceCameraScroll(): void {
+    if (typeof document === 'undefined' || this.previousFaceCameraBodyOverflow !== null) return;
+    this.previousFaceCameraBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  private restoreFaceCameraScroll(): void {
+    if (typeof document === 'undefined' || this.previousFaceCameraBodyOverflow === null) return;
+    document.body.style.overflow = this.previousFaceCameraBodyOverflow;
+    this.previousFaceCameraBodyOverflow = null;
   }
 
   closeForm(): void {

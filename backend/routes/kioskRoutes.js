@@ -36,13 +36,20 @@ const kioskEnrollmentRateLimit = rateLimit({
   legacyHeaders: false
 });
 
+const kioskFaceIdentifyRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false
+});
+
 router.post('/auth', kioskAuthRateLimit, authenticateKiosk);
 router.post('/renew', kioskAuthRateLimit, renewKiosk);
 router.post('/lock', kioskOperationRateLimit, lockKiosk);
 router.post('/enrollment/identify-member', kioskEnrollmentRateLimit, protectKiosk, identifyMemberForEnrollment);
 router.post('/enrollment/face', kioskEnrollmentRateLimit, protectKiosk, enrollMemberFace);
 router.get('/config', kioskOperationRateLimit, protectKiosk, getKioskConfig);
-router.post('/face/identify', kioskOperationRateLimit, protectKiosk, identifyFace);
+router.post('/face/identify', kioskFaceIdentifyRateLimit, protectKiosk, identifyFace);
 router.post('/attendance/check-in', kioskOperationRateLimit, protectKiosk, faceCheckIn);
 router.post('/qr/check-in', kioskOperationRateLimit, protectKiosk, qrCheckIn);
 

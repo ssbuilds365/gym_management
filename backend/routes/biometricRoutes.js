@@ -1,8 +1,10 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const { protectOwner } = require('../middleware/authMiddleware');
 const {
   getFaceStatus,
+  getFaceDuplicateReport,
   registerFace,
   removeFace,
   createKioskCredential,
@@ -11,9 +13,24 @@ const {
   revokeKioskCredential
 } = require('../controllers/biometricController');
 
+const biometricEnrollmentRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false
+});
+
+const biometricDiagnosticRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false
+});
+
 router.use(protectOwner);
 router.get('/credentials/status/:id', getFaceStatus);
-router.post('/credentials/member/:id/face', registerFace);
+router.get('/duplicates', biometricDiagnosticRateLimit, getFaceDuplicateReport);
+router.post('/credentials/member/:id/face', biometricEnrollmentRateLimit, registerFace);
 router.delete('/credentials/member/:id/face', removeFace);
 router.post('/kiosk-credentials', createKioskCredential);
 router.get('/kiosk-credentials', listKioskCredentials);

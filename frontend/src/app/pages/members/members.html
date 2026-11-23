@@ -149,6 +149,9 @@
             <button type="button" class="secondary-action-btn" (click)="openImportHistory()">Import History</button>
             <button type="button" class="secondary-action-btn" (click)="downloadImportTemplate()">Download Template</button>
             <button type="button" class="secondary-action-btn" (click)="openMemberImport()">Import Excel</button>
+            <button type="button" class="secondary-action-btn" (click)="auditFaceDuplicates()" [disabled]="faceDuplicateAuditLoading">
+                {{ faceDuplicateAuditLoading ? 'Auditing Face IDs…' : 'Audit Face IDs' }}
+            </button>
             <button class="add-btn" (click)="openAddForm()">
                 <span>＋</span> Add New Member
             </button>
@@ -170,6 +173,22 @@
     <div class="message-box error" *ngIf="biometricActionError" role="alert">
         {{ biometricActionError }}
     </div>
+    <div class="message-box error" *ngIf="faceDuplicateAuditError" role="alert">
+        {{ faceDuplicateAuditError }}
+    </div>
+    <section class="message-box" *ngIf="faceDuplicateAuditReport" aria-live="polite">
+        <strong>
+            {{ faceDuplicateAuditReport.status === 'REVIEW_REQUIRED'
+                ? 'Potential duplicate face identities require staff review.'
+                : 'No duplicate face identities detected.' }}
+        </strong>
+        <ul *ngIf="faceDuplicateAuditReport.groups.length">
+            <li *ngFor="let group of faceDuplicateAuditReport.groups">
+                Member IDs: {{ group.memberIds.join(', ') }} · {{ group.status }}
+            </li>
+        </ul>
+        <small>Templates and attendance records are not changed by this audit.</small>
+    </section>
 
     <!-- Filters -->
     <div class="filter-card">
@@ -521,24 +540,51 @@
                         </p>
                     </div>
                     <p class="error" *ngIf="faceEnrollmentError">{{ faceEnrollmentError }}</p>
-                    <p class="success" *ngIf="faceEnrollmentMessage">{{ faceEnrollmentMessage }}</p>
-                    <label class="form-group full-width">
-                        <input type="checkbox" [(ngModel)]="faceConsentGranted" name="faceConsentGranted">
-                        I have verified this member and obtained informed consent to capture and store a face recognition template for gym attendance.
+                    <p class="success face-enrollment-message" *ngIf="faceEnrollmentMessage" role="status">
+                        {{ faceEnrollmentMessage }}
+                    </p>
+                    <label class="biometric-consent-card">
+                        <input
+                            class="biometric-consent-input"
+                            type="checkbox"
+                            [(ngModel)]="faceConsentGranted"
+                            name="faceConsentGranted"
+                            aria-labelledby="face-consent-title face-consent-copy"
+                            aria-describedby="face-consent-privacy">
+                        <span class="biometric-consent-content">
+                            <span class="biometric-consent-heading">
+                                <span class="biometric-shield-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none">
+                                        <path d="M12 3.2 19 6v5.1c0 4.7-2.9 7.8-7 9.7-4.1-1.9-7-5-7-9.7V6l7-2.8Z" />
+                                        <path d="m8.8 12 2.1 2.1 4.5-4.5" />
+                                    </svg>
+                                </span>
+                                <span class="biometric-consent-title-wrap">
+                                    <span id="face-consent-title" class="biometric-consent-title" role="heading" aria-level="4">Biometric Consent</span>
+                                    <span class="biometric-consent-subtitle">Confirm consent before capturing a face template.</span>
+                                </span>
+                            </span>
+                            <span class="biometric-consent-check-row">
+                                <span class="biometric-checkbox-indicator" aria-hidden="true">
+                                    <svg viewBox="0 0 16 16" fill="none">
+                                        <path d="m3.3 8.2 3 3 6.4-6.5" />
+                                    </svg>
+                                </span>
+                                <span id="face-consent-copy" class="biometric-consent-copy">
+                                    I have verified this member and obtained informed consent to capture and store a secure face recognition template for gym attendance.
+                                </span>
+                            </span>
+                            <span id="face-consent-privacy" class="biometric-privacy-note">
+                                <span aria-hidden="true">●</span>
+                                Camera frames are sent securely for temporary server-side processing and are not retained. Face templates are encrypted at rest. This system does not verify liveness or prevent photo/video replay; staff must verify identity in person.
+                            </span>
+                        </span>
                     </label>
-                    <video #faceVideo *ngIf="faceCameraActive" autoplay muted playsinline class="face-enrollment-preview"></video>
-                    <small *ngIf="faceCameraActive">
-                        Center one face in the preview and keep still. Three face samples will be captured; raw images are not uploaded or stored.
-                    </small>
                     <div class="membership-footer-actions">
-                        <button type="button" class="save-btn" (click)="startFaceEnrollment()" [disabled]="faceCameraActive || faceEnrollmentLoading || !faceConsentGranted">
+                        <button type="button" class="save-btn face-enrollment-start" (click)="startFaceEnrollment()" [disabled]="faceCameraActive || faceEnrollmentLoading || !faceConsentGranted">
                             {{ faceStatus === 'Registered' ? 'Update Face' : 'Register Face' }}
                         </button>
-                        <button type="button" class="save-btn" *ngIf="faceCameraActive" (click)="captureAndRegisterFace()" [disabled]="faceEnrollmentLoading || !faceConsentGranted">
-                            {{ faceEnrollmentLoading ? 'Saving…' : 'Capture &amp; Save' }}
-                        </button>
                         <button type="button" class="cancel-btn" *ngIf="faceStatus === 'Registered'" (click)="removeRegisteredFace()">Remove Face</button>
-                        <button type="button" class="cancel-btn" *ngIf="faceCameraActive" (click)="stopFaceCamera()">Cancel Camera</button>
                     </div>
                 </div>
 
@@ -612,6 +658,71 @@
 
         </form>
     </div>
+</div>
+
+<div
+    class="face-camera-overlay"
+    *ngIf="faceCameraActive"
+    (click)="stopFaceCamera()">
+    <section
+        class="face-camera-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="face-camera-title"
+        aria-describedby="face-camera-instruction face-camera-progress"
+        (click)="$event.stopPropagation()"
+        (keydown.escape)="stopFaceCamera()">
+        <header class="face-camera-header">
+            <div class="face-camera-member">
+                <span class="eyebrow">BIOMETRIC ENROLLMENT</span>
+                <h2 id="face-camera-title">Face Registration</h2>
+                <p><strong>{{ memberForm.fullName }}</strong><span>Member ID: {{ selectedMemberId }}</span></p>
+            </div>
+            <div class="face-camera-header-actions">
+                <span
+                    class="face-registration-status"
+                    [class.registered]="faceStatus === 'Registered'"
+                    [class.not-registered]="faceStatus === 'NotRegistered'">
+                    <span class="face-status-dot" aria-hidden="true"></span>
+                    {{ faceStatus === 'NotRegistered' ? 'Not Registered' : faceStatus }}
+                </span>
+                <button
+                    type="button"
+                    class="face-camera-close"
+                    aria-label="Close face registration"
+                    (click)="stopFaceCamera()">&times;</button>
+            </div>
+        </header>
+
+        <div class="face-camera-main">
+            <div class="face-camera-preview">
+                <video #faceVideo autoplay muted playsinline aria-label="Live face camera preview"></video>
+                <div class="face-position-guide" aria-hidden="true"></div>
+                <span class="face-preview-hint">Align one face inside the guide</span>
+            </div>
+            <p id="face-camera-instruction" class="face-camera-instruction">Center one face in the preview and keep still.</p>
+            <p id="face-camera-progress" class="face-camera-progress" role="status" aria-live="polite">
+                <span class="face-progress-dot" aria-hidden="true"></span>
+                {{ faceEnrollmentMessage || 'Camera Ready · Position your face' }}
+            </p>
+            <p class="face-camera-error" *ngIf="faceEnrollmentError" role="alert">
+                {{ faceEnrollmentError }}
+            </p>
+        </div>
+
+        <footer class="face-camera-footer">
+            <button
+                type="button"
+                class="face-camera-primary"
+                (click)="captureAndRegisterFace()"
+                [disabled]="faceEnrollmentLoading || !faceConsentGranted">
+                {{ faceEnrollmentLoading ? 'Processing…' : 'Capture & Save' }}
+            </button>
+            <button type="button" class="face-camera-secondary" (click)="stopFaceCamera()">
+                Cancel Camera
+            </button>
+        </footer>
+    </section>
 </div>
 
 <!-- Membership History Modal -->

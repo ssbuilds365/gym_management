@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { PassThrough } = require('node:stream');
 
 const Member = require('../models/Member');

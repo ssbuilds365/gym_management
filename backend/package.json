@@ -6,15 +6,21 @@
   "scripts": {
     "test": "node --test",
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "node --watch server.js",
     "migrate:business-type": "node scripts/migrateDanceAcademyBusinessType.js",
-    "migrate:kiosk-idempotency-index": "node scripts/migrateKioskIdempotencyIndex.js"
+    "migrate:kiosk-idempotency-index": "node scripts/migrateKioskIdempotencyIndex.js",
+    "migrate:biometric-duplicate-index": "node scripts/migrateBiometricDuplicateIndex.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "dependencies": {
+    "@tensorflow/tfjs": "1.7.0",
+    "@e965/xlsx": "0.20.3",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
@@ -22,15 +28,16 @@
     "exceljs": "^4.4.0",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.2",
+    "face-api.js": "0.22.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.4",
     "multer": "^2.5.0",
     "nodemailer": "^10.3.1",
-    "sharp": "^0.34.5",
-    "xlsx": "^0.18.5"
+    "sharp": "^0.35.5"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
+  "overrides": {
+    "node-fetch": "^2.7.0",
+    "uuid": "^11.1.1"
   }
 }

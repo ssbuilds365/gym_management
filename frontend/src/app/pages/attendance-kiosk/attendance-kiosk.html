@@ -63,12 +63,20 @@
           <strong>QR Check-in</strong>
           <small>{{ qrEnabled ? 'Use the member QR fallback' : 'QR Attendance Disabled' }}</small>
         </button>
-        <button type="button" class="face-register-action" (click)="openSelfRegistration()">
+        <button type="button" class="face-register-action" (click)="openSelfRegistration()" [disabled]="!faceEnrollmentEnabled">
           <span class="action-icon" aria-hidden="true">＋</span>
-          <strong>Register Face</strong>
-          <small>Use Member ID or mobile number</small>
+          <strong>{{ faceEnrollmentEnabled ? 'Register Face' : faceEnrollmentRequiresStaff ? 'Staff Registration Required' : 'Face Registration Unavailable' }}</strong>
+          <small>{{ faceEnrollmentEnabled ? 'Use Member ID or mobile number' : 'Register in the Members tab' }}</small>
         </button>
       </div>
+      <p class="face-config-warning" *ngIf="!faceEnrollmentEnabled" role="status">
+        {{ faceEnrollmentRequiresStaff
+          ? 'Face registration must be completed by gym staff after verifying the member.'
+          : 'Face registration is temporarily unavailable. Please contact gym staff.' }}
+      </p>
+      <p class="face-config-warning" *ngIf="faceEnabled" role="note">
+        Face recognition does not verify liveness or prevent photo/video replay.
+      </p>
 
       <section class="camera-panel" *ngIf="cameraActive">
         <video #video autoplay muted playsinline></video>
@@ -118,7 +126,7 @@
         </div>
         <label class="self-consent">
           <input type="checkbox" [(ngModel)]="selfConsent" name="selfConsent" [disabled]="selfEnrollmentLoading || !!selfEnrollmentSuccess">
-          I consent to storing a secure face recognition template for gym attendance. Templates may be deleted through gym staff or the member deletion process.
+          I consent to secure face processing for gym attendance. Camera frames are sent to the backend for temporary processing and are not retained; encrypted templates may be deleted through gym staff or the member deletion process.
         </label>
         <div class="enrollment-camera" *ngIf="enrollmentCameraActive">
           <video #enrollmentVideo autoplay muted playsinline></video>

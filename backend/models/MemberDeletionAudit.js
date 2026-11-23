@@ -43,6 +43,13 @@ const memberDeletionAuditSchema = new mongoose.Schema(
       required: true
     },
 
+    revokedBiometricCredentialCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+      required: true
+    },
+
     deletedMembershipCount: {
       type: Number,
       min: 0,

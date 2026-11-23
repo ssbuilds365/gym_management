@@ -5,11 +5,48 @@
 application is **not production-ready for biometric attendance** and requires
 the deployment actions and external decisions below.
 
+## Biometric identity security update (2026-11-23)
+
+- Face enrollment through the Members tab and the kiosk enrollment controller
+  now shares a backend comparison path. A gym-scoped transaction lock serializes
+  enrollment, replacement, revocation, member deletion, and biometric check-in.
+  Cross-member matches use the existing 128D face-api descriptor format and
+  existing Euclidean acceptance distance (`0.45`); identification rejects
+  multiple-member matches and near-tied candidates.
+- Owner registration no longer silently overwrites an active template.
+  Replacement requires owner authentication plus explicit confirmation, and
+  revokes/erases the old encrypted template in the same transaction that saves
+  the replacement. Deleting a member also revokes/erases current face templates.
+- Identifier-only kiosk self-enrollment is disabled because a member ID or
+  phone number is not proof of identity. Staff must verify identity and enroll
+  from the authenticated Members page. The kiosk enrollment endpoint still
+  applies duplicate detection to any valid, scoped enrollment authorization.
+- The owner-only `GET /api/biometric/duplicates` report and Members-page audit
+  list affected member IDs for manual review. The report never returns
+  embeddings and does not change templates or attendance history.
+- Transactions require a replica-set MongoDB deployment (MongoDB Atlas
+  supports this). Apply the non-destructive scan index with
+  `npm run migrate:biometric-duplicate-index` from `backend`. The per-gym lock
+  collection is created on first use and relies on MongoDB's built-in unique
+  `_id` index. No new environment variable is introduced.
+- Liveness/photo-replay detection is not supported by the current face-api.js
+  detector or recognition model. Frontend face detection and stability checks
+  are not liveness checks. The UI now discloses this limitation; do not treat a
+  camera preview or face match as proof of liveness.
+- Angular now captures and sends bounded JPEG camera samples; it no longer
+  generates or submits face embeddings. The backend runs the existing
+  face-api.js detector, landmark, and recognition models, then compares and
+  encrypts only server-generated descriptors. Uploaded frames are processed
+  transiently and are not written to storage. Recognition capability stays
+  disabled unless model initialization succeeds. Only the tiny face detector
+  weights remain public in the frontend; landmark and descriptor weights are
+  deployed with the backend.
+
 ## Completed in this change
 
 | Area | Implemented |
 |---|---|
-| Member deletion | Authenticated-owner and tenant-scoped transactional deletion. Removes attendance, QR credentials, biometric enrollment documents, and unpaid/non-financial membership history. Retains payment records and paid membership records, anonymizes the member profile, and writes a minimal deletion audit. The operation returns a clear error if MongoDB transactions are unavailable. |
+| Member deletion | Authenticated-owner and tenant-scoped transactional deletion. Removes attendance, QR credentials, and legacy biometric enrollment documents; revokes and erases current face templates; and removes eligible membership history. Retains payment records and paid membership records, anonymizes the member profile, and writes a minimal deletion audit. The operation returns a clear error if MongoDB transactions are unavailable. |
 | Dashboard and payments | Dashboard and payments use membership `paidAmount` for consistent membership collection totals. Outstanding dues are calculated from non-cancelled memberships for non-deleted members, clamped to zero and rounded to cents. Pending transactions remain a separate payment-record status count. |
 | Attendance sessions | Manual/QR check-in rejects an existing open session and applies a 30-second repeat-scan cooldown. Check-out finds open sessions across dates, allowing overnight checkout; duration is stored in minutes and reports include it. Check-in timestamps/date are server-generated. The ordinary manual route no longer accepts `Biometric` as an attendance type. |
 | Dance Academy | Removed from registration and the business-type schema. Added an idempotent migration mapping existing records to `Other`; it has **not** been run against MongoDB. |
@@ -17,7 +54,7 @@ the deployment actions and external decisions below.
 | Reports & Analytics | Tenant-scoped date-filtered summary and daily report for member joins, attendance visits/checkouts/duration, payment transactions, successful recorded transactions, and outstanding membership fees. Date ranges are limited to 366 days. |
 | Settings | Tenant-scoped read/update of business name, type, phone, email, and address. The owner name and account security settings are not editable here. |
 | Subscription | Displays the saved business subscription status. The API explicitly reports that billing is not configured; it does not invent plans, prices, renewal dates, or checkout actions. |
-| Biometric data foundations | Added a tenant/member/finger-scoped enrollment schema requiring consent metadata and an AES-256-GCM utility. Ciphertext, IV, and authentication tag are excluded from normal query selection. No raw image field, enrollment route, matching code, or template response to Angular was added. |
+| Biometric identity security | Face templates are AES-256-GCM encrypted at rest. Owner registration and kiosk identification use gym-scoped credentials, backend-only descriptor generation, server-side duplicate comparison, explicit replacement, current-template match proofs, and fail-closed decryption. Camera frames are transiently processed in the backend and not persisted. The detector still does not provide liveness verification. |
 
 ## Important files
 
@@ -25,6 +62,7 @@ the deployment actions and external decisions below.
 - Dashboard, payments, and attendance: [dashboardController.js](../backend/controllers/dashboardController.js), [paymentController.js](../backend/controllers/paymentController.js), [attendanceController.js](../backend/controllers/attendanceController.js), [Attendance.js](../backend/models/Attendance.js)
 - Team, reports, business settings/subscription: [trainerStaffController.js](../backend/controllers/trainerStaffController.js), [reportController.js](../backend/controllers/reportController.js), [businessController.js](../backend/controllers/businessController.js), [TrainerStaff.js](../backend/models/TrainerStaff.js)
 - Biometric storage foundation: [BiometricEnrollment.js](../backend/models/BiometricEnrollment.js), [biometricEncryption.js](../backend/utils/biometricEncryption.js)
+- Face identity matching and transaction lock: [biometricIdentity.js](../backend/services/biometricIdentity.js), [BiometricEnrollmentLock.js](../backend/models/BiometricEnrollmentLock.js), [kioskController.js](../backend/controllers/kioskController.js), [biometricController.js](../backend/controllers/biometricController.js)
 - API registration: [server.js](../backend/server.js), routes under [backend/routes](../backend/routes)
 - Angular shell and management modules: [app.ts](../frontend/src/app/app.ts), [app.html](../frontend/src/app/app.html), [management.ts](../frontend/src/app/services/management.ts)
 - Business-type migration: [migrateDanceAcademyBusinessType.js](../backend/scripts/migrateDanceAcademyBusinessType.js)
@@ -76,6 +114,11 @@ created SecuGen audit was not modified in this work.
   because queries explicitly match `deletedAt: null`.
 - Added `MemberDeletionAudit`, `TrainerStaff`, and `BiometricEnrollment`
   collections and their tenant-scoped indexes.
+- Added the `BiometricEnrollmentLock` collection, created on demand with its
+  built-in unique `_id` index, plus the non-unique
+  `biometric_identity_scan` index on `BiometricCredential`. Run
+  `npm run migrate:biometric-duplicate-index` before deployment if automatic
+  index creation is disabled.
 - Added optional `Attendance.durationMinutes`; reports derive duration from
   check-in/check-out timestamps, including for older attendance records.
 - No production or staging MongoDB data was accessed or changed.
@@ -100,32 +143,45 @@ created SecuGen audit was not modified in this work.
 
 - Deploy the backend from `backend` and frontend from `frontend` using the
   existing Render/Vercel configuration.
+- Backend runtime must be Node.js `>=20.19.0` (required by the existing
+  Mongoose 9 dependency and the patched image processor).
 - Keep existing `MONGODB_URI`, `JWT_SECRET`, and `FRONTEND_URL` server-side
   environment configuration intact.
-- Before any future biometric enrollment is enabled, configure
-  `BIOMETRIC_ENCRYPTION_KEY` as a secret-manager value decoding from Base64 to
-  exactly 32 bytes, plus `BIOMETRIC_ENCRYPTION_KEY_VERSION`. Never put the key
-  in MongoDB, source control, Angular configuration, or logs. Rotation and
-  recovery procedures still need to be established.
+- Kiosk and current biometric enrollment require `BIOMETRIC_TEMPLATE_KEY`,
+  configured server-side as Base64 that decodes to exactly 32 bytes.
+  `BIOMETRIC_KEY_VERSION` is optional and defaults to `v1`. Keep the key stable
+  while encrypted templates exist; never put it in MongoDB, source control,
+  Angular configuration, or logs. The legacy `BIOMETRIC_ENCRYPTION_KEY`
+  utility setting does not configure kiosk enrollment.
+- Backend face inference uses the existing model files under
+  `backend/models/face-api` and the CPU TensorFlow.js runtime. Keep those model
+  assets in the backend deployment. No additional environment variable is
+  required; missing or failed model initialization disables face capabilities
+  without disabling QR attendance.
 - Review the deployment index policy for the new tenant-scoped indexes.
+- Biometric enrollment, replacement, revocation, and face check-in require
+  MongoDB transactions and therefore a replica-set deployment. No new
+  environment variables are required.
 - Run the business-type migration only after verifying its target URI and
   taking a backup; the script was not run in this implementation session.
 
 ## Validation
 
-- Backend: `npm test` — **3 passed, 0 failed**. Tests cover encryption/decryption
-  with a synthetic non-biometric payload, wrong-key rejection, schema
-  protection/consent requirements, and currency precision. These do not
-  replace database integration tests.
-- Backend JavaScript: `node --check` passed for all changed backend files after
-  the final edits.
-- Angular production build: **passed** after the final report-table and
-  payment-summary refinements.
-- Angular tests: **14 passed, 3 failed**, with one unhandled route error. The
-  failures match the earlier baseline: the app-title assertion, absent
-  `ActivatedRoute` providers in login/register tests, and an unmatched `/login`
-  route in the app test. They are unrelated to the new modules; no test
-  baseline was changed here.
+- Backend: `npm test` — **152 passed, 0 failed**. Includes face model startup,
+  invalid/no-face image rejection, duplicate enrollment, cross-tenant
+  rejection, ambiguous identity rejection, revoked-template checks, expiry,
+  and existing QR and attendance tests. Controller security tests use
+  synthetic descriptors; they do not prove recognition accuracy for a real
+  member's face.
+- Backend face inference: existing CPU models loaded successfully; a
+  synthetic blank JPEG was rejected as `NO_FACE`. No member image was used.
+- Dependency audit: `npm audit` — **0 vulnerabilities** after upgrading the
+  image decoder and spreadsheet parser, pinning patched transitive packages,
+  and replacing the development watcher with Node's built-in watch mode.
+- Angular: targeted kiosk and member biometric tests — **13 passed**.
+- Angular production build: **passed**. It reports existing CommonJS
+  optimization warnings in unrelated libraries.
+- The entire Angular test suite was not rerun in this follow-up.
 - No connected HU20 capture, template extraction, enrollment, 1:1, or 1:N test
   was performed.
 
@@ -152,10 +208,12 @@ created SecuGen audit was not modified in this work.
    attendance concurrency/cooldown, overnight checkout, reporting boundaries,
    and migration behavior against a disposable replica-set database before
    production rollout.
-6. **Biometric deletion propagation is incomplete by design.** Database
-   enrollment records are deleted transactionally and QR credentials are
-   invalidated immediately, but no local-agent index/cache or backup lifecycle
-   exists to purge or document yet.
+6. **Biometric spoof protection and deployment validation remain incomplete.**
+   Face-api.js does not provide liveness detection. Validate model startup and
+   image processing on the target backend, any threshold/margin against an
+   authorized, consented evaluation set, and transaction/concurrency behavior
+   against a disposable replica-set database before production rollout. No
+   production database was accessed or changed during this patch.
 
 Do not treat this report as evidence that the full biometric system or
 production acceptance suite is complete.

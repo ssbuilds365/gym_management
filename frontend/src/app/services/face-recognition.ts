@@ -4,7 +4,7 @@ type FaceApi = typeof import('face-api.js');
 
 export class FaceRecognitionError extends Error {
   constructor(
-    public readonly code: 'MODEL_LOAD_FAILED' | 'NO_FACE' | 'MULTIPLE_FACES' | 'INVALID_DESCRIPTOR',
+    public readonly code: 'MODEL_LOAD_FAILED' | 'NO_FACE' | 'INVALID_CAPTURE' | 'CAMERA_NOT_READY',
     message: string
   ) {
     super(message);
@@ -22,58 +22,19 @@ export class FaceRecognitionService {
 
     this.loading = import('face-api.js')
       .then(async api => {
-        await Promise.all([
-          api.nets.tinyFaceDetector.loadFromUri('/models'),
-          api.nets.faceLandmark68Net.loadFromUri('/models'),
-          api.nets.faceRecognitionNet.loadFromUri('/models')
-        ]);
+        await api.nets.tinyFaceDetector.loadFromUri('/models');
         this.api = api;
         return api;
       })
-      .catch(error => {
+      .catch(() => {
         this.loading = null;
         throw new FaceRecognitionError(
           'MODEL_LOAD_FAILED',
-          'Face recognition models could not be loaded. Check the connection and retry.'
+          'Face detection could not be loaded. Check the connection and retry.'
         );
       });
 
     return this.loading;
-  }
-
-  async detectOneDescriptor(video: HTMLVideoElement): Promise<{
-    descriptor: number[];
-    box: { x: number; y: number; width: number; height: number };
-  }> {
-    const api = await this.load();
-    const detections = await api
-      .detectAllFaces(video, new api.TinyFaceDetectorOptions({
-        inputSize: 320,
-        scoreThreshold: 0.6
-      }))
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    if (detections.length === 0) {
-      throw new FaceRecognitionError('NO_FACE', 'No face was detected. Position the member inside the guide.');
-    }
-    if (detections.length !== 1) {
-      throw new FaceRecognitionError('MULTIPLE_FACES', 'More than one face is visible. Ensure only one person is in view.');
-    }
-
-    const descriptor = Array.from(detections[0].descriptor);
-    if (
-      descriptor.length !== 128 ||
-      descriptor.some(value => !Number.isFinite(value) || Math.abs(value) > 2)
-    ) {
-      throw new FaceRecognitionError('INVALID_DESCRIPTOR', 'Face recognition could not produce a valid template.');
-    }
-
-    const box = detections[0].detection.box;
-    return {
-      descriptor,
-      box: { x: box.x, y: box.y, width: box.width, height: box.height }
-    };
   }
 
   async detectSingleFace(video: HTMLVideoElement): Promise<{
@@ -107,7 +68,29 @@ export class FaceRecognitionService {
     return centerDistance <= 0.035 && widthRatio >= 0.82 && widthRatio <= 1.22;
   }
 
-  async descriptorFromStableFace(video: HTMLVideoElement): Promise<number[]> {
+  captureImage(video: HTMLVideoElement): string {
+    if (!video.videoWidth || !video.videoHeight) {
+      throw new FaceRecognitionError('CAMERA_NOT_READY', 'Camera preview is not ready.');
+    }
+
+    const scale = Math.min(1, 1280 / video.videoWidth, 1280 / video.videoHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw new FaceRecognitionError('INVALID_CAPTURE', 'Camera image could not be captured.');
+    }
+
+    try {
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } catch {
+      throw new FaceRecognitionError('INVALID_CAPTURE', 'Camera image could not be captured.');
+    }
+  }
+
+  async captureFromStableFace(video: HTMLVideoElement): Promise<string> {
     const first = await this.detectSingleFace(video);
     if (!first) {
       throw new FaceRecognitionError('NO_FACE', 'Position one face inside the guide and hold still.');
@@ -120,6 +103,6 @@ export class FaceRecognitionService {
     if (!this.isStable(first, second, video.videoWidth, video.videoHeight)) {
       throw new FaceRecognitionError('NO_FACE', 'Hold your face steady inside the guide and retry.');
     }
-    return (await this.detectOneDescriptor(video)).descriptor;
+    return this.captureImage(video);
   }
 }

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const crypto = require('node:crypto');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const ExcelJS = require('exceljs');
 const path = require('node:path');
 const { TextDecoder } = require('node:util');

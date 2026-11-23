@@ -1,0 +1,579 @@
+.face-enrollment-message {
+  overflow-wrap: anywhere;
+}
+
+.membership-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+
+  button {
+    min-height: 44px;
+  }
+}
+
+.face-enrollment-start {
+  background: linear-gradient(135deg, #18b891, #117b72);
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #20c9a0, #159388);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.biometric-consent-card {
+  position: relative;
+  display: block;
+  min-width: 0;
+  margin-top: 16px;
+  padding: 16px;
+  overflow: hidden;
+  color: #e7f2f5;
+  background: linear-gradient(145deg, #102436, #0b1826);
+  border: 1px solid rgba(81, 209, 180, 0.28);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+
+  &:hover {
+    border-color: rgba(81, 209, 180, 0.55);
+  }
+}
+
+.biometric-consent-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.biometric-consent-input:focus-visible + .biometric-consent-content {
+  outline: 3px solid rgba(45, 212, 178, 0.7);
+  outline-offset: 3px;
+}
+
+.biometric-consent-content {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  border-radius: 9px;
+}
+
+.biometric-consent-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 11px;
+}
+
+.biometric-shield-icon {
+  display: grid;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: #59e0bf;
+  background: rgba(32, 183, 149, 0.13);
+  border: 1px solid rgba(72, 218, 183, 0.25);
+  border-radius: 11px;
+
+  svg {
+    width: 23px;
+    height: 23px;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.biometric-consent-title-wrap {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.biometric-consent-title {
+  color: #f5fbfc;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.biometric-consent-subtitle {
+  color: #a7bbc3;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.biometric-consent-check-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.biometric-checkbox-indicator {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  place-items: center;
+  color: #07251f;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid #718690;
+  border-radius: 5px;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+
+  svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0;
+    transform: scale(0.7);
+    transition: opacity 160ms ease, transform 160ms ease;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.biometric-consent-input:checked + .biometric-consent-content .biometric-checkbox-indicator {
+  background: #35d4ad;
+  border-color: #35d4ad;
+
+  svg {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.biometric-consent-copy {
+  min-width: 0;
+  color: #e0eaed;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.biometric-privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  color: #a9c2c7;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+
+  > span {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    color: #43d5b1;
+    font-size: 9px;
+  }
+}
+
+.face-camera-overlay {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding:
+    max(16px, env(safe-area-inset-top, 0px))
+    max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgba(3, 10, 19, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.face-camera-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  width: min(680px, calc(100vw - 40px));
+  min-width: 0;
+  max-height: 90vh;
+  max-height: 90dvh;
+  box-sizing: border-box;
+  padding: 22px;
+  overflow: hidden;
+  color: #edf5f7;
+  background: linear-gradient(150deg, #0f2030, #08131f 74%);
+  border: 1px solid rgba(146, 190, 202, 0.2);
+  border-radius: 20px;
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.55);
+}
+
+.face-camera-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 14px;
+}
+
+.face-camera-member {
+  min-width: 0;
+
+  .eyebrow {
+    color: #48d4b0;
+    letter-spacing: 1.4px;
+  }
+
+  h2 {
+    margin: 5px 0 7px;
+    color: #f5fbfc;
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  p {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin: 0;
+    color: #a9bbc4;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  strong {
+    color: #eaf3f5;
+  }
+
+  p span {
+    overflow-wrap: anywhere;
+  }
+}
+
+.face-camera-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.face-registration-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 29px;
+  padding: 0 10px;
+  color: #c1d0d5;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+
+  &.registered {
+    color: #77e7c8;
+    background: rgba(30, 165, 128, 0.13);
+    border-color: rgba(75, 218, 177, 0.24);
+  }
+
+  &.not-registered {
+    color: #f0c77e;
+  }
+}
+
+.face-status-dot,
+.face-progress-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  background: #f0bd64;
+  border-radius: 50%;
+}
+
+.face-registration-status.registered .face-status-dot {
+  background: #4bd8af;
+}
+
+.face-camera-close {
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: #dce8eb;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(45, 212, 178, 0.7);
+    outline-offset: 2px;
+  }
+}
+
+.face-camera-main {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.face-camera-preview {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 43vh, 360px);
+  min-width: 0;
+  overflow: hidden;
+  background: #03090f;
+  border: 1px solid rgba(83, 213, 183, 0.25);
+  border-radius: 14px;
+  isolation: isolate;
+
+  video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+}
+
+.face-position-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(46%, 230px);
+  height: 76%;
+  border: 2px solid rgba(72, 225, 185, 0.86);
+  border-radius: 48% / 43%;
+  box-shadow: 0 0 0 999px rgba(1, 8, 14, 0.12), 0 0 22px rgba(47, 213, 173, 0.18);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.face-preview-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
+  padding: 7px 10px;
+  color: #e3f2f1;
+  background: rgba(4, 17, 25, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.face-camera-instruction {
+  margin: 0;
+  color: #c4d2d7;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.face-camera-progress {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 9px;
+  min-height: 40px;
+  margin: 0;
+  padding: 11px 12px;
+  color: #d8e6e9;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.face-progress-dot {
+  margin-top: 5px;
+  background: #4bd8af;
+}
+
+.face-camera-error {
+  margin: 0;
+  padding: 10px 12px;
+  color: #ffd2d4;
+  background: rgba(161, 41, 58, 0.2);
+  border: 1px solid rgba(255, 120, 132, 0.3);
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.face-camera-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+
+  button {
+    min-width: 150px;
+    min-height: 46px;
+    padding: 0 18px;
+    border-radius: 10px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 750;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 3px solid rgba(45, 212, 178, 0.7);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      opacity: 0.52;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.face-camera-primary {
+  color: #06241d;
+  background: linear-gradient(135deg, #48dfb7, #21b893);
+  border: 1px solid rgba(121, 255, 219, 0.35);
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+}
+
+.face-camera-secondary {
+  color: #d9e5e8;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+@media (min-width: 577px) and (max-width: 991px) {
+  .face-camera-dialog {
+    width: min(680px, calc(100vw - 32px));
+    padding: 20px;
+  }
+
+  .face-camera-preview {
+    height: clamp(280px, 42vh, 340px);
+  }
+}
+
+@media (max-width: 576px) {
+  .biometric-consent-card {
+    padding: 14px;
+  }
+
+  .biometric-consent-content {
+    gap: 12px;
+  }
+
+  .biometric-consent-copy {
+    font-size: 12px;
+  }
+
+  .face-camera-overlay {
+    place-items: center;
+    padding:
+      max(12px, env(safe-area-inset-top, 0px))
+      max(12px, env(safe-area-inset-right, 0px))
+      max(12px, env(safe-area-inset-bottom, 0px))
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .face-camera-dialog {
+    width: calc(100vw - 24px);
+    max-height: 92vh;
+    max-height: 92dvh;
+    gap: 13px;
+    padding: 15px;
+    border-radius: 18px;
+  }
+
+  .face-camera-header {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .face-camera-member h2 {
+    font-size: 18px;
+  }
+
+  .face-camera-header-actions {
+    gap: 7px;
+  }
+
+  .face-registration-status {
+    min-height: 27px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+
+  .face-camera-close {
+    flex-basis: 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  .face-camera-preview {
+    height: clamp(260px, 38dvh, 320px);
+    border-radius: 12px;
+  }
+
+  .face-position-guide {
+    width: min(58%, 210px);
+    height: 78%;
+  }
+
+  .face-camera-footer {
+    flex-direction: column;
+    gap: 8px;
+
+    button {
+      width: 100%;
+      min-height: 46px;
+    }
+  }
+}

@@ -49,6 +49,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   cameraActive = false;
   cameraError = '';
   cameraStatus = 'Camera idle';
+  faceEnrollmentEnabled = false;
+  faceEnrollmentRequiresStaff = false;
   selfRegistrationOpen = false;
   selfIdentifier = '';
   selfMember: { id: string; displayId?: string; name: string } | null = null;
@@ -183,6 +185,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.gymName = gym.name || this.gymName;
     this.gymLogoUrl = gym.logoUrl || '';
     this.faceEnabled = Boolean(gym.faceAttendanceEnabled);
+    this.faceEnrollmentEnabled = Boolean(gym.faceEnrollmentEnabled);
+    this.faceEnrollmentRequiresStaff = Boolean(gym.faceEnrollmentRequiresStaff);
     this.qrEnabled = Boolean(gym.qrAttendanceEnabled);
     if (persist) sessionStorage.setItem('ssfm_kiosk_gym', JSON.stringify(gym));
   }
@@ -201,7 +205,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   openSelfRegistration(): void {
-    if (!this.authorized) return;
+    if (!this.authorized || !this.faceEnrollmentEnabled) return;
     this.selfRegistrationOpen = true;
     this.selfIdentifier = '';
     this.selfMember = null;
@@ -246,7 +250,14 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.selfEnrollmentLoading = false;
         this.selfMember = null;
         this.selfEnrollmentToken = '';
-        this.selfEnrollmentError = error.error?.message || 'Member Not Found. Please contact gym staff.';
+        if (error?.status === 401) {
+          this.stopCamera();
+          this.clearKioskSession();
+          this.selfRegistrationOpen = false;
+          this.authError = 'Kiosk session expired. Please authorize again.';
+        } else {
+          this.selfEnrollmentError = this.getEnrollmentErrorMessage(error);
+        }
         this.changeDetector.markForCheck();
       }
     });
@@ -298,36 +309,34 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       if (!this.modelsLoaded) throw new Error('Face recognition models could not be loaded. Check the connection and retry.');
       const video = this.enrollmentVideoRef?.nativeElement;
       if (!video) throw new Error('Camera preview is unavailable.');
-      const samples: number[][] = [];
+      const samples: string[] = [];
       let previousBox: { x: number; y: number; width: number; height: number } | null = null;
       const captureStartedAt = performance.now();
       for (let index = 0; index < 3; index += 1) {
-        const capture = await this.faceRecognition.detectOneDescriptor(video);
+        const box = await this.faceRecognition.detectSingleFace(video);
+        if (!box) {
+          throw new FaceRecognitionError('NO_FACE', 'Position one face inside the guide and hold still.');
+        }
         if (
           previousBox &&
-          !this.faceRecognition.isStable(previousBox, capture.box, video.videoWidth, video.videoHeight)
+          !this.faceRecognition.isStable(previousBox, box, video.videoWidth, video.videoHeight)
         ) {
           throw new FaceRecognitionError('NO_FACE', 'Hold your face steady inside the guide and retry.');
         }
-        previousBox = capture.box;
-        samples.push(capture.descriptor);
+        previousBox = box;
+        samples.push(this.faceRecognition.captureImage(video));
         this.selfEnrollmentStage = 'Face detected · Capturing samples...';
         this.changeDetector.markForCheck();
         if (index < 2) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       }
       captureMs = performance.now() - captureStartedAt;
-      this.selfEnrollmentStage = 'Generating secure face template...';
-      this.changeDetector.markForCheck();
-      const descriptor = samples[0].map((_, index) =>
-        samples.reduce((sum, sample) => sum + sample[index], 0) / samples.length
-      );
-      this.selfEnrollmentStage = 'Saving your registration...';
+      this.selfEnrollmentStage = 'Processing face samples securely...';
       this.changeDetector.markForCheck();
       const saveStartedAt = performance.now();
       const response = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/enrollment/face`,
         {
-          descriptor,
+          images: samples,
           enrollmentToken: this.selfEnrollmentToken,
           consentGranted: true
         },
@@ -342,6 +351,13 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       this.stopEnrollmentCamera();
     } catch (error: any) {
       this.selfEnrollmentError = this.getEnrollmentErrorMessage(error);
+      if (error?.status === 401 && error?.error?.code !== 'ENROLLMENT_TOKEN_INVALID') {
+        this.stopEnrollmentCamera();
+        this.stopCamera();
+        this.clearKioskSession();
+        this.selfRegistrationOpen = false;
+        this.authError = 'Kiosk session expired. Please authorize again.';
+      }
       this.selfEnrollmentStage = this.enrollmentCameraActive ? 'Camera Ready · Retry capture when ready.' : '';
     } finally {
       this.selfEnrollmentLoading = false;
@@ -366,21 +382,53 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
 
   private getEnrollmentErrorMessage(error: any): string {
     const code = error?.error?.code;
-    if (error instanceof FaceRecognitionError) return error.message;
-    if (error?.status === 0) return 'Network connection failed. Check the connection and retry.';
-    if (error?.status === 401 || code === 'ENROLLMENT_TOKEN_INVALID') {
-      return 'Enrollment authorization expired. Verify the member again and retry.';
+    if (error instanceof FaceRecognitionError) {
+      return error.message;
     }
-    if (code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE') {
-      return 'Face registration is not configured on the server. Please contact gym staff.';
+    if (error?.status === 0) return 'Network connection failed. Check the connection and retry.';
+    if (code === 'ENROLLMENT_TOKEN_INVALID') {
+      return 'Enrollment authorization expired. Please verify the member again.';
+    }
+    if (code === 'STAFF_ENROLLMENT_REQUIRED') {
+      return 'Face registration must be completed by gym staff after verifying the member.';
+    }
+    if (error?.status === 401) {
+      return 'Kiosk session expired. Please authorize again.';
+    }
+    if (code === 'KIOSK_AUTH_UNAVAILABLE') {
+      return 'Kiosk authorization is temporarily unavailable. Please contact gym staff.';
+    }
+    if (
+      code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE' ||
+      code === 'BIOMETRIC_RECOGNITION_UNAVAILABLE' ||
+      code === 'BIOMETRIC_SERVICE_UNAVAILABLE'
+    ) {
+      return 'Face registration is temporarily unavailable. Please contact gym staff.';
     }
     if (code === 'FACE_ALREADY_REGISTERED') return 'This member already has a registered face. Ask gym staff to update it.';
-    if (code === 'MEMBER_NOT_FOUND') return 'Member not found or no longer active. Verify the member details and retry.';
+    if (code === 'DUPLICATE_FACE_DETECTED') {
+      return 'This face is already registered with another member. Please contact gym staff.';
+    }
+    if (code === 'MEMBER_NOT_FOUND') return 'Member not found.';
     if (code === 'CONSENT_REQUIRED') return 'Consent is required before registering a face.';
-    if (code === 'INVALID_FACE_DESCRIPTOR') return 'Face template validation failed. Reposition the face and retry.';
-    if (code === 'BIOMETRIC_VALIDATION_FAILED') return 'Face registration details were invalid. Please retry.';
-    if (code === 'BIOMETRIC_SAVE_FAILED') return 'The server could not save the face template. Please retry or contact gym staff.';
-    return error?.error?.message || error?.message || 'Unable to register face. Please retry.';
+    if (
+      code === 'INVALID_FACE_DESCRIPTOR' ||
+      code === 'INVALID_FACE_IMAGE' ||
+      code === 'INVALID_FACE_IMAGES' ||
+      code === 'INVALID_FACE_TEMPLATE' ||
+      code === 'NO_FACE' ||
+      code === 'MULTIPLE_FACES' ||
+      code === 'FACE_TOO_SMALL' ||
+      code === 'INCOMPATIBLE_FACE_MODEL' ||
+      code === 'BIOMETRIC_VALIDATION_FAILED'
+    ) {
+      return 'Unable to process face. Please try again.';
+    }
+    if (code === 'BIOMETRIC_SAVE_FAILED' || error?.status >= 500) {
+      return 'Unable to save face registration. Please retry.';
+    }
+    if (error?.status === 400) return 'Unable to process face. Please try again.';
+    return 'Unable to register face. Please retry.';
   }
 
   private logPerformance(
@@ -564,17 +612,15 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         return;
       }
       this.previousScanFaceBox = null;
-      const descriptorStartedAt = performance.now();
-      const { descriptor } = await this.faceRecognition.detectOneDescriptor(video);
-      const descriptorMs = performance.now() - descriptorStartedAt;
+      const image = this.faceRecognition.captureImage(video);
       const identifyStartedAt = performance.now();
       const identify = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/face/identify`,
-        { descriptor },
+        { image },
         { headers: this.kioskHeaders() }
       ).toPromise();
       const identifyMs = performance.now() - identifyStartedAt;
-      this.logPerformance('continuous-face-recognition', { descriptorMs, identifyMs });
+      this.logPerformance('continuous-face-recognition', { identifyMs });
       if (!identify?.success || !identify.matchToken) return;
       await this.checkIn(identify.member.id, identify.matchToken);
       this.recognitionCooldownUntil = Date.now() + 7000;
@@ -588,8 +634,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
           title: 'MEMBER ACCESS DENIED',
           message: 'This member is inactive or blocked. Please contact gym staff.'
         });
-      } else if (error?.status !== 404) {
-        this.cameraStatus = error?.error?.message || 'Recognition temporarily unavailable';
+      } else {
+        this.cameraStatus = this.getSafeFaceVerificationMessage(error);
       }
     } finally {
       this.continuousScanInProgress = false;
@@ -600,14 +646,14 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private async loadFaceModels(showCameraError = true): Promise<void> {
     if (this.modelsLoaded) return;
     this.modelsLoading = true;
-    this.faceStatus = 'Loading face recognition model...';
+    this.faceStatus = 'Loading face detection model...';
     try {
       await this.faceRecognition.load();
       this.modelsLoaded = true;
     } catch (error) {
       const message = error instanceof FaceRecognitionError
         ? error.message
-        : 'Face recognition models could not be loaded. Check the connection and retry.';
+        : 'Face detection could not be loaded. Check the connection and retry.';
       if (showCameraError) this.showCameraError(message);
       else this.faceStatus = message;
     } finally {
@@ -620,10 +666,9 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     if (!video) return;
     this.faceStatus = 'Verifying identity...';
     try {
-      let descriptor: number[];
-      const descriptorStartedAt = performance.now();
+      let image: string;
       try {
-        descriptor = await this.faceRecognition.descriptorFromStableFace(video);
+        image = await this.faceRecognition.captureFromStableFace(video);
       } catch (error) {
         if (!(error instanceof FaceRecognitionError) || error.code !== 'NO_FACE') throw error;
         this.showResult({
@@ -634,30 +679,38 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.scanning = false;
         return;
       }
-      const descriptorMs = performance.now() - descriptorStartedAt;
       const identifyStartedAt = performance.now();
       const identify = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/face/identify`,
-        { descriptor },
+        { image },
         { headers: this.kioskHeaders() }
       ).toPromise();
       const identifyMs = performance.now() - identifyStartedAt;
-      this.logPerformance('face-recognition', { descriptorMs, identifyMs });
+      this.logPerformance('face-recognition', { identifyMs });
       if (!identify?.success) throw new Error(identify?.message || 'Member not recognized');
       if (!identify.matchToken) throw new Error('The server did not return a face-match proof.');
       await this.checkIn(identify.member.id, identify.matchToken);
     } catch (error: any) {
-      if (error?.error?.code === 'FACE_NOT_REGISTERED') {
+      if (error?.error?.code === 'FACE_NOT_REGISTERED' || error?.error?.code === 'UNKNOWN_FACE') {
         this.showResult({
           type: 'not-found',
-          title: 'Face Not Registered',
-          message: 'Your face is not registered. Please use Register Face or contact gym staff.'
+          title: 'Face Not Recognized',
+          message: 'Face not recognized. Please try again.'
         });
       } else if (error?.status === 404 || error?.error?.code === 'MEMBER_NOT_RECOGNIZED') {
         this.showResult({
           type: 'not-found',
           title: 'Member Not Recognized',
-          message: 'Please retry or use QR check-in.',
+          message: 'Face not recognized. Please try again.',
+        });
+      } else if (
+        error?.error?.code === 'AMBIGUOUS_FACE' ||
+        error?.error?.code === 'DUPLICATE_BIOMETRIC_IDENTITY'
+      ) {
+        this.showResult({
+          type: 'error',
+          title: 'Unable to Verify Identity',
+          message: 'Unable to verify identity. Please reposition your face.'
         });
       } else if (error?.status === 401) {
         this.clearKioskSession();
@@ -666,7 +719,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.showResult({
           type: 'error',
           title: 'Verification unavailable',
-          message: error?.error?.message || 'Unable to verify the face. Please retry.'
+          message: this.getSafeFaceVerificationMessage(error)
         });
       }
     } finally {
@@ -730,7 +783,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.showResult({
           type: 'error',
           title: 'Attendance not marked',
-          message: error?.error?.message || 'Unable to mark attendance.'
+          message: 'Unable to mark attendance. Please try again or use QR check-in.'
         });
       }
     } finally {
@@ -742,6 +795,33 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     return new HttpHeaders({ Authorization: `Bearer ${this.token}` });
   }
 
+  private getSafeFaceVerificationMessage(error: any): string {
+    const code = error?.error?.code;
+    if (
+      code === 'UNKNOWN_FACE' ||
+      code === 'FACE_NOT_REGISTERED' ||
+      code === 'NO_FACE' ||
+      error?.status === 404
+    ) {
+      return 'Face not recognized. Please try again.';
+    }
+    if (
+      code === 'AMBIGUOUS_FACE' ||
+      code === 'DUPLICATE_BIOMETRIC_IDENTITY' ||
+      code === 'MULTIPLE_FACES' ||
+      code === 'FACE_TOO_SMALL'
+    ) {
+      return 'Unable to verify identity. Please reposition your face.';
+    }
+    if (code === 'INVALID_FACE_IMAGE') {
+      return 'Unable to process face. Please try again.';
+    }
+    if (error?.status === 0 || error?.status >= 500) {
+      return 'Biometric service is temporarily unavailable.';
+    }
+    return 'Unable to verify identity. Please reposition your face.';
+  }
+
   private clearKioskSession(): void {
     sessionStorage.removeItem('ssfm_kiosk_token');
     sessionStorage.removeItem('ssfm_kiosk_gym');
@@ -749,6 +829,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.token = '';
     this.authorized = false;
     this.faceEnabled = false;
+    this.faceEnrollmentEnabled = false;
+    this.faceEnrollmentRequiresStaff = false;
     this.qrEnabled = false;
   }
 

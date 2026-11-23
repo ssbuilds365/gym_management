@@ -3,9 +3,14 @@ const MemberMembership = require('../models/MemberMembership');
 const Attendance = require('../models/Attendance');
 const Payment = require('../models/Payment');
 const BiometricEnrollment = require('../models/BiometricEnrollment');
+const BiometricCredential = require('../models/BiometricCredential');
 const MemberDeletionAudit = require('../models/MemberDeletionAudit');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const {
+  ensureGymLock,
+  incrementGymLock
+} = require('../services/biometricIdentity');
 const { parseMemberDateRange } = require('../utils/memberDateRange');
 // Add New Member
 exports.createMember = async (req, res) => {
@@ -380,6 +385,7 @@ exports.deleteMember = async (req, res) => {
       });
     }
 
+    const biometricLockId = await ensureGymLock(req.tenantId, req.owner.businessId);
     session = await mongoose.startSession();
 
     let deletionSummary;
@@ -388,6 +394,7 @@ exports.deleteMember = async (req, res) => {
       const member = await Member.findOne({
         _id: id,
         tenantId: req.tenantId,
+        businessId: req.owner.businessId,
         deletedAt: null
       }).session(session);
 
@@ -396,6 +403,13 @@ exports.deleteMember = async (req, res) => {
         error.code = 'MEMBER_NOT_FOUND';
         throw error;
       }
+
+      await incrementGymLock(
+        biometricLockId,
+        req.tenantId,
+        req.owner.businessId,
+        session
+      );
 
       const payments = await Payment.find({
         tenantId: req.tenantId,
@@ -438,6 +452,22 @@ exports.deleteMember = async (req, res) => {
         memberId: member._id
       }).session(session);
 
+      const biometricCredentialResult = await BiometricCredential.updateMany({
+        tenantId: req.tenantId,
+        businessId: member.businessId,
+        memberId: member._id,
+        biometricType: 'Face',
+        registrationStatus: 'Active'
+      }, {
+        $set: {
+          registrationStatus: 'Revoked',
+          consentStatus: 'Withdrawn',
+          revokedAt: new Date(),
+          revokedBy: req.owner._id
+        },
+        $unset: { encryptedTemplate: 1 }
+      }).session(session);
+
       const membershipFilter = {
         tenantId: req.tenantId,
         memberId: member._id
@@ -477,6 +507,7 @@ exports.deleteMember = async (req, res) => {
           retainedMembershipCount: retainedMembershipIds.length,
           deletedAttendanceCount: attendanceResult.deletedCount || 0,
           deletedBiometricEnrollmentCount: biometricResult.deletedCount || 0,
+          revokedBiometricCredentialCount: biometricCredentialResult.modifiedCount || 0,
           deletedMembershipCount: membershipResult.deletedCount || 0
         }],
         { session }
@@ -486,7 +517,8 @@ exports.deleteMember = async (req, res) => {
         retainedPaymentCount: payments.length,
         retainedMembershipCount: retainedMembershipIds.length,
         deletedAttendanceCount: attendanceResult.deletedCount || 0,
-        deletedBiometricEnrollmentCount: biometricResult.deletedCount || 0
+        deletedBiometricEnrollmentCount: biometricResult.deletedCount || 0,
+        revokedBiometricCredentialCount: biometricCredentialResult.modifiedCount || 0
       };
     });
 

@@ -30,5 +30,15 @@ biometricCredentialSchema.index(
   { unique: true, partialFilterExpression: { registrationStatus: 'Active' } }
 );
 biometricCredentialSchema.index({ tenantId: 1, registrationStatus: 1, consentStatus: 1 });
+biometricCredentialSchema.index(
+  {
+    tenantId: 1,
+    businessId: 1,
+    biometricType: 1,
+    registrationStatus: 1,
+    consentStatus: 1
+  },
+  { name: 'biometric_identity_scan' }
+);
 
 module.exports = mongoose.model('BiometricCredential', biometricCredentialSchema);

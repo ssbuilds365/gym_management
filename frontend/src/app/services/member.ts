@@ -88,12 +88,21 @@ export class MemberService {
     return this.http.get(`${environment.apiUrl}/biometric/credentials/status/${memberId}`);
   }
 
-  registerFace(memberId: string, descriptor: number[], consentTextVersion: string): Observable<any> {
+  getFaceDuplicateReport(): Observable<any> {
+    return this.http.get(`${environment.apiUrl}/biometric/duplicates`);
+  }
+
+  registerFace(
+    memberId: string,
+    images: string[],
+    consentTextVersion: string,
+    replaceExisting = false
+  ): Observable<any> {
     return this.http.post(`${environment.apiUrl}/biometric/credentials/member/${memberId}/face`, {
-      descriptor,
-      modelVersion: 'face-api.js-v1-128d',
+      images,
       consentGranted: true,
-      consentTextVersion
+      consentTextVersion,
+      replaceExisting
     });
   }
 

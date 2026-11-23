@@ -4,9 +4,20 @@ const Member = require('../models/Member');
 const BiometricCredential = require('../models/BiometricCredential');
 const KioskCredential = require('../models/KioskCredential');
 const Business = require('../models/Business');
-const { encryptTemplate } = require('../utils/biometricTemplateEncryption');
 const { hashKioskSecret } = require('../utils/kioskCredentialSecret');
 const config = require('../config/env');
+const faceRecognition = require('../services/faceRecognition');
+const {
+  FACE_MODEL_VERSION,
+  BiometricIdentityError,
+  enrollFaceTemplate,
+  getActiveCredentials,
+  findDuplicateIdentityGroups,
+  revokeFaceTemplates
+} = require('../services/biometricIdentity');
+
+const DUPLICATE_FACE_MESSAGE =
+  'This face is already registered with another member. Please contact gym staff.';
 
 const requireGymAdministrator = (req, res) => {
   if (!req.owner || req.owner.role !== 'owner' || req.owner.tenantId.toString() !== req.tenantId.toString()) {
@@ -55,16 +66,21 @@ exports.getFaceStatus = async (req, res) => {
 
 exports.registerFace = async (req, res) => {
   try {
+    if (!requireGymAdministrator(req, res)) return;
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: 'Invalid member ID.' });
     }
-    const { descriptor, modelVersion, consentGranted, consentTextVersion } = req.body || {};
+    const { images, consentGranted, consentTextVersion } = req.body || {};
     if (
-      !Array.isArray(descriptor) ||
-      descriptor.length !== 128 ||
-      descriptor.some(value => typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 2)
+      !Array.isArray(images) ||
+      images.length !== 3 ||
+      images.some(image => typeof image !== 'string')
     ) {
-      return res.status(400).json({ success: false, message: 'A valid 128-value face template is required.' });
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_FACE_IMAGES',
+        message: 'Three valid camera samples are required for face registration.'
+      });
     }
     if (consentGranted !== true) {
       return res.status(400).json({ success: false, message: 'Informed member consent is required.' });
@@ -72,10 +88,6 @@ exports.registerFace = async (req, res) => {
     const normalizedConsentVersion = String(consentTextVersion || '').trim();
     if (!normalizedConsentVersion || normalizedConsentVersion.length > 100) {
       return res.status(400).json({ success: false, message: 'Consent text version is required.' });
-    }
-    const normalizedModelVersion = String(modelVersion || '').trim();
-    if (!normalizedModelVersion || normalizedModelVersion.length > 100) {
-      return res.status(400).json({ success: false, message: 'Recognition model version is required.' });
     }
     const member = await Member.findOne({
       _id: req.params.id,
@@ -86,46 +98,85 @@ exports.registerFace = async (req, res) => {
     });
     if (!member) return res.status(404).json({ success: false, message: 'Active member not found.' });
 
-    const encryptedTemplate = encryptTemplate({
+    const descriptor = await faceRecognition.descriptorFromImages(images);
+    const outcome = await enrollFaceTemplate({
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      memberId: member._id,
       descriptor,
-      modelVersion: normalizedModelVersion
+      consentTextVersion: normalizedConsentVersion,
+      createdBy: req.owner._id,
+      replaceExisting: req.body?.replaceExisting === true
     });
-    await BiometricCredential.findOneAndUpdate(
-      {
-        tenantId: req.tenantId,
-        businessId: req.owner.businessId,
-        memberId: member._id,
-        biometricType: 'Face'
-      },
-      {
-        $set: {
-          encryptedTemplate,
-          modelVersion: normalizedModelVersion,
-          registrationStatus: 'Active',
-          consentStatus: 'Granted',
-          consentTextVersion: normalizedConsentVersion,
-          consentAt: new Date(),
-          registeredAt: new Date(),
-          createdBy: req.owner._id,
-          revokedAt: null,
-          revokedBy: null
-        }
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+    if (outcome.status === 'duplicate-face') {
+      return res.status(409).json({
+        success: false,
+        code: 'DUPLICATE_FACE_DETECTED',
+        message: DUPLICATE_FACE_MESSAGE
+      });
+    }
+    if (outcome.status === 'already-registered') {
+      return res.status(409).json({
+        success: false,
+        code: 'FACE_ALREADY_REGISTERED',
+        message: 'This member already has a registered face. Confirm an authorized replacement to continue.'
+      });
+    }
     return res.status(201).json({
       success: true,
       message: 'Face registration saved securely.',
       status: 'Registered',
-      modelVersion: normalizedModelVersion
+      modelVersion: FACE_MODEL_VERSION
     });
   } catch (error) {
-    console.error('Face registration error:', error.message);
-    return res.status(500).json({ success: false, message: 'Unable to save face registration.' });
+    if (error instanceof BiometricIdentityError) {
+      const message = error.code === 'MEMBER_NOT_FOUND'
+        ? 'Active member not found.'
+        : error.code === 'INVALID_FACE_DESCRIPTOR'
+          ? 'A valid 128-value face template is required.'
+          : error.code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE'
+            ? 'Face registration is temporarily unavailable. Please contact gym staff.'
+            : error.code === 'BIOMETRIC_SAVE_FAILED'
+              ? 'Face registration could not be saved. Please retry.'
+              : 'Biometric service is temporarily unavailable. Please contact gym staff.';
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message
+      });
+    }
+    if (error instanceof faceRecognition.FaceRecognitionError) {
+      const message = error.code === 'BIOMETRIC_RECOGNITION_UNAVAILABLE'
+        ? 'Face registration is temporarily unavailable. Please contact gym staff.'
+        : error.code === 'NO_FACE' || error.code === 'MULTIPLE_FACES' || error.code === 'FACE_TOO_SMALL'
+          ? 'Unable to process face. Please try again.'
+          : error.code === 'INVALID_FACE_IMAGES' || error.code === 'INVALID_FACE_IMAGE'
+            ? 'Unable to process face. Please try again.'
+            : 'Face registration is temporarily unavailable. Please contact gym staff.';
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message
+      });
+    }
+    if (error?.code === 20 || /transaction numbers are only allowed/i.test(String(error?.message || ''))) {
+      return res.status(503).json({
+        success: false,
+        code: 'BIOMETRIC_TRANSACTION_REQUIRED',
+        message: 'Face registration is temporarily unavailable. Please contact gym staff.'
+      });
+    }
+    console.error('Face registration failed:', { code: error?.code || 'BIOMETRIC_ERROR' });
+    return res.status(503).json({
+      success: false,
+      code: 'BIOMETRIC_SERVICE_UNAVAILABLE',
+      message: 'Face registration is temporarily unavailable. Please contact gym staff.'
+    });
   }
 };
 
 exports.removeFace = async (req, res) => {
+  if (!requireGymAdministrator(req, res)) return;
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
     return res.status(400).json({ success: false, message: 'Invalid member ID.' });
   }
@@ -136,26 +187,73 @@ exports.removeFace = async (req, res) => {
     deletedAt: null
   }).select('_id');
   if (!member) return res.status(404).json({ success: false, message: 'Member not found.' });
-  const result = await BiometricCredential.updateMany({
-    tenantId: req.tenantId,
-    businessId: req.owner.businessId,
-    memberId: member._id,
-    biometricType: 'Face',
-    registrationStatus: 'Active'
-  }, {
-    $set: {
-      registrationStatus: 'Revoked',
-      consentStatus: 'Withdrawn',
-      revokedAt: new Date(),
-      revokedBy: req.owner._id
-    },
-    $unset: { encryptedTemplate: 1 }
-  });
-  return res.json({
-    success: true,
-    message: 'Face registration removed.',
-    removed: result.modifiedCount > 0
-  });
+  try {
+    const result = await revokeFaceTemplates(
+      req.tenantId,
+      req.owner.businessId,
+      member._id,
+      req.owner._id
+    );
+    return res.json({
+      success: true,
+      message: 'Face registration removed.',
+      removed: result.modifiedCount > 0
+    });
+  } catch (error) {
+    if (error?.code === 20 || /transaction numbers are only allowed/i.test(String(error?.message || ''))) {
+      return res.status(503).json({
+        success: false,
+        code: 'BIOMETRIC_TRANSACTION_REQUIRED',
+        message: 'Face removal is temporarily unavailable. Please contact gym staff.'
+      });
+    }
+    console.error('Face removal failed:', { code: error?.code || 'BIOMETRIC_ERROR' });
+    return res.status(503).json({
+      success: false,
+      code: 'BIOMETRIC_SERVICE_UNAVAILABLE',
+      message: 'Face removal is temporarily unavailable. Please contact gym staff.'
+    });
+  }
+};
+
+exports.getFaceDuplicateReport = async (req, res) => {
+  if (!requireGymAdministrator(req, res)) return;
+  if (!config.biometricTemplateKeyConfigured) {
+    return res.status(503).json({
+      success: false,
+      code: 'BIOMETRIC_ENCRYPTION_UNAVAILABLE',
+      message: 'The biometric diagnostic service is temporarily unavailable.'
+    });
+  }
+  try {
+    const records = await getActiveCredentials(
+      req.tenantId,
+      req.owner.businessId,
+      undefined,
+      false
+    );
+    const groups = findDuplicateIdentityGroups(records);
+    return res.json({
+      success: true,
+      status: groups.length ? 'REVIEW_REQUIRED' : 'NO_DUPLICATES_FOUND',
+      groups,
+      scannedTemplateCount: records.length
+    });
+  } catch (error) {
+    if (error instanceof BiometricIdentityError) {
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message: 'The biometric diagnostic service could not verify stored templates.'
+      });
+    }
+    console.error('Biometric duplicate diagnostic failed:', { code: error?.code || 'BIOMETRIC_ERROR' });
+    return res.status(503).json({
+      success: false,
+      code: 'BIOMETRIC_SERVICE_UNAVAILABLE',
+      message: 'The biometric diagnostic service is temporarily unavailable.'
+    });
+  }
 };
 
 exports.createKioskCredential = async (req, res) => {

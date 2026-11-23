@@ -1,23 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const mongoose = require('mongoose');
 
 process.env.MONGODB_URI ||= 'mongodb://127.0.0.1:27017/ssfm-biometric-tests';
 process.env.BIOMETRIC_TEMPLATE_KEY = crypto.randomBytes(32).toString('base64');
 
 const Member = require('../models/Member');
 const BiometricCredential = require('../models/BiometricCredential');
+const BiometricEnrollmentLock = require('../models/BiometricEnrollmentLock');
 const {
   getFaceStatus,
+  getFaceDuplicateReport,
   registerFace,
   removeFace
 } = require('../controllers/biometricController');
-const { decryptTemplate } = require('../utils/biometricTemplateEncryption');
+const { encryptTemplate, decryptTemplate } = require('../utils/biometricTemplateEncryption');
+const faceRecognition = require('../services/faceRecognition');
 
 const memberId = '507f1f77bcf86cd799439011';
 const tenantId = '507f1f77bcf86cd799439012';
 const businessId = '507f1f77bcf86cd799439013';
 const ownerId = '507f1f77bcf86cd799439014';
+const originalDescriptorFromImages = faceRecognition.descriptorFromImages;
+faceRecognition.descriptorFromImages = async images => JSON.parse(images[0]);
+test.after(() => {
+  faceRecognition.descriptorFromImages = originalDescriptorFromImages;
+});
+
+const encodedSamples = descriptor => Array(3).fill(JSON.stringify(descriptor));
 
 const response = () => ({
   statusCode: 200,
@@ -35,7 +46,7 @@ const response = () => ({
 const request = (body = {}) => ({
   params: { id: memberId },
   tenantId,
-  owner: { _id: ownerId, businessId },
+  owner: { _id: ownerId, tenantId, businessId, role: 'owner' },
   body
 });
 
@@ -84,45 +95,111 @@ test('face status is read only for a member in the owner tenant and business', a
   assert.equal(Object.hasOwn(res.body, 'encryptedTemplate'), false);
 });
 
-test('face registration encrypts the descriptor and updates the scoped member record', async t => {
+test('face registration rejects implicit overwrite and atomically revokes before authorized replacement', async t => {
   const originalMemberFindOne = Member.findOne;
-  const originalCredentialUpdate = BiometricCredential.findOneAndUpdate;
+  const originalStartSession = mongoose.startSession;
+  const originalCredentialFindOne = BiometricCredential.findOne;
+  const originalCredentialFind = BiometricCredential.find;
+  const originalCredentialCreate = BiometricCredential.create;
+  const originalCredentialUpdateMany = BiometricCredential.updateMany;
+  const originalLockUpdateOne = BiometricEnrollmentLock.updateOne;
   t.after(() => {
     Member.findOne = originalMemberFindOne;
-    BiometricCredential.findOneAndUpdate = originalCredentialUpdate;
+    mongoose.startSession = originalStartSession;
+    BiometricCredential.findOne = originalCredentialFindOne;
+    BiometricCredential.find = originalCredentialFind;
+    BiometricCredential.create = originalCredentialCreate;
+    BiometricCredential.updateMany = originalCredentialUpdateMany;
+    BiometricEnrollmentLock.updateOne = originalLockUpdateOne;
   });
 
   let memberFilter;
-  const updates = [];
-  Member.findOne = async filter => {
-    memberFilter = filter;
-    return { _id: memberId };
+  const credentials = [];
+  let originalEncryptedTemplate;
+  let credentialSequence = 0;
+  const memberQuery = {
+    select() { return this; },
+    session: async () => ({ _id: memberId }),
+    then(resolve, reject) {
+      return Promise.resolve({ _id: memberId }).then(resolve, reject);
+    }
   };
-  BiometricCredential.findOneAndUpdate = async (filter, update, options) => {
-    updates.push({ filter, update, options });
-    return update.$set;
+  Member.findOne = filter => {
+    memberFilter = filter;
+    return memberQuery;
+  };
+  mongoose.startSession = async () => ({
+    withTransaction: callback => callback(),
+    endSession: async () => {}
+  });
+  BiometricEnrollmentLock.updateOne = async () => ({ acknowledged: true });
+  BiometricCredential.findOne = filter => ({
+    select() { return this; },
+    session: async () => credentials.find(item =>
+      item.memberId === String(filter.memberId) &&
+      item.registrationStatus === 'Active'
+    ) || null
+  });
+  BiometricCredential.find = filter => ({
+    select() { return this; },
+    session: async () => credentials.filter(item =>
+      item.tenantId === tenantId &&
+      item.businessId === businessId &&
+      item.registrationStatus === 'Active' &&
+      (!filter.consentStatus || item.consentStatus === filter.consentStatus)
+    )
+  });
+  BiometricCredential.create = async (documents, options) => {
+    assert.ok(options?.session);
+    const saved = documents.map(document => ({
+      _id: `credential-${++credentialSequence}`,
+      ...document,
+      tenantId,
+      businessId,
+      memberId
+    }));
+    credentials.push(...saved);
+    return saved;
+  };
+  BiometricCredential.updateMany = async (filter, update) => {
+    const active = credentials.filter(item =>
+      item.memberId === String(filter.memberId) &&
+      item.registrationStatus === 'Active'
+    );
+    for (const item of active) {
+      originalEncryptedTemplate = item.encryptedTemplate;
+      Object.assign(item, update.$set);
+      delete item.encryptedTemplate;
+    }
+    return { modifiedCount: active.length };
   };
 
   const descriptor = Array.from({ length: 128 }, (_, index) => index / 256);
   const registration = {
-    descriptor,
-    modelVersion: 'face-api.js-v1-128d',
+    images: encodedSamples(descriptor),
     consentGranted: true,
     consentTextVersion: 'face-consent-v1'
   };
   const firstResponse = response();
   await registerFace(request(registration), firstResponse);
-  const updatedDescriptor = descriptor.map(value => value - 0.1);
-  const updateResponse = response();
+  const implicitOverwriteResponse = response();
   await registerFace(request({
     ...registration,
-    descriptor: updatedDescriptor
-  }), updateResponse);
+    images: encodedSamples(descriptor.map(value => value - 0.1))
+  }), implicitOverwriteResponse);
+  const replacementDescriptor = descriptor.map(value => value - 0.1);
+  const replacementResponse = response();
+  await registerFace(request({
+    ...registration,
+    images: encodedSamples(replacementDescriptor),
+    replaceExisting: true
+  }), replacementResponse);
 
   assert.equal(firstResponse.statusCode, 201);
   assert.equal(firstResponse.body.status, 'Registered');
-  assert.equal(updateResponse.statusCode, 201);
-  assert.equal(updateResponse.body.status, 'Registered');
+  assert.equal(implicitOverwriteResponse.statusCode, 409);
+  assert.equal(implicitOverwriteResponse.body.code, 'FACE_ALREADY_REGISTERED');
+  assert.equal(replacementResponse.statusCode, 201);
   assert.deepEqual(memberFilter, {
     _id: memberId,
     tenantId,
@@ -130,25 +207,113 @@ test('face registration encrypts the descriptor and updates the scoped member re
     deletedAt: null,
     status: 'Active'
   });
-  assert.equal(updates.length, 2);
-  assert.equal(updates[0].filter.tenantId, tenantId);
-  assert.equal(updates[0].filter.businessId, businessId);
-  assert.equal(updates[0].filter.memberId, memberId);
-  assert.equal(updates[0].options.upsert, true);
-  assert.equal(updates[0].update.$set.consentStatus, 'Granted');
-  assert.equal(updates[0].update.$set.createdBy, ownerId);
+  assert.equal(credentials.length, 2);
+  assert.equal(credentials[0].registrationStatus, 'Revoked');
+  assert.equal(credentials[0].consentStatus, 'Withdrawn');
+  assert.equal(Object.hasOwn(credentials[0], 'encryptedTemplate'), false);
+  assert.equal(credentials[1].consentStatus, 'Granted');
+  assert.equal(credentials[1].createdBy, ownerId);
   assert.deepEqual(
-    decryptTemplate(updates[0].update.$set.encryptedTemplate).descriptor,
+    decryptTemplate(originalEncryptedTemplate).descriptor,
     descriptor
   );
   assert.deepEqual(
-    decryptTemplate(updates[1].update.$set.encryptedTemplate).descriptor,
-    updatedDescriptor
+    decryptTemplate(credentials[1].encryptedTemplate).descriptor,
+    replacementDescriptor
   );
-  assert.equal(Object.hasOwn(firstResponse.body, 'descriptor'), false);
+  assert.equal(Object.hasOwn(replacementResponse.body, 'descriptor'), false);
 });
 
-test('face registration rejects invalid member IDs, descriptors, and missing consent', async t => {
+test('owner Members-tab enrollment rejects another member with the same face', async t => {
+  const originals = {
+    memberFindOne: Member.findOne,
+    startSession: mongoose.startSession,
+    credentialFindOne: BiometricCredential.findOne,
+    credentialFind: BiometricCredential.find,
+    credentialCreate: BiometricCredential.create,
+    lockUpdateOne: BiometricEnrollmentLock.updateOne
+  };
+  const credentials = [];
+  let credentialSequence = 0;
+  const secondMemberId = '507f1f77bcf86cd799439015';
+  const memberQuery = member => ({
+    select() { return this; },
+    session: async () => ({ _id: member }),
+    then(resolve, reject) {
+      return Promise.resolve({ _id: member }).then(resolve, reject);
+    }
+  });
+  Member.findOne = filter => memberQuery(filter._id);
+  mongoose.startSession = async () => ({
+    withTransaction: callback => callback(),
+    endSession: async () => {}
+  });
+  BiometricEnrollmentLock.updateOne = async () => ({ acknowledged: true });
+  BiometricCredential.findOne = filter => ({
+    select() { return this; },
+    session: async () => credentials.find(record =>
+      record.memberId === String(filter.memberId) &&
+      record.registrationStatus === 'Active'
+    ) || null
+  });
+  BiometricCredential.find = filter => ({
+    select() { return this; },
+    session: async () => credentials.filter(record =>
+      record.tenantId === tenantId &&
+      record.businessId === businessId &&
+      record.registrationStatus === 'Active'
+    )
+  });
+  BiometricCredential.create = async (documents, options) => {
+    assert.ok(options?.session);
+    const saved = documents.map(document => ({
+      _id: `member-face-${++credentialSequence}`,
+      ...document,
+      tenantId,
+      businessId,
+      memberId: String(document.memberId)
+    }));
+    credentials.push(...saved);
+    return saved;
+  };
+  t.after(() => {
+    Member.findOne = originals.memberFindOne;
+    mongoose.startSession = originals.startSession;
+    BiometricCredential.findOne = originals.credentialFindOne;
+    BiometricCredential.find = originals.credentialFind;
+    BiometricCredential.create = originals.credentialCreate;
+    BiometricEnrollmentLock.updateOne = originals.lockUpdateOne;
+  });
+
+  const descriptor = Array.from({ length: 128 }, (_, index) => index / 256);
+  const firstResponse = response();
+  await registerFace({
+    ...request({
+      images: encodedSamples(descriptor),
+      consentGranted: true,
+      consentTextVersion: 'face-consent-v1'
+    }),
+    params: { id: memberId }
+  }, firstResponse);
+  const duplicateResponse = response();
+  await registerFace({
+    ...request({
+      images: encodedSamples(descriptor),
+      consentGranted: true,
+      consentTextVersion: 'face-consent-v1'
+    }),
+    params: { id: secondMemberId }
+  }, duplicateResponse);
+
+  assert.equal(firstResponse.statusCode, 201);
+  assert.equal(duplicateResponse.statusCode, 409);
+  assert.equal(duplicateResponse.body.code, 'DUPLICATE_FACE_DETECTED');
+  assert.equal(duplicateResponse.body.message,
+    'This face is already registered with another member. Please contact gym staff.');
+  assert.equal(credentials.length, 1);
+});
+
+test('face registration rejects invalid member IDs, malformed image samples, and missing consent', async t => {
   const originalMemberFindOne = Member.findOne;
   let memberQueryCount = 0;
   t.after(() => { Member.findOne = originalMemberFindOne; });
@@ -164,21 +329,19 @@ test('face registration rejects invalid member IDs, descriptors, and missing con
   }, invalidIdResponse);
   assert.equal(invalidIdResponse.statusCode, 400);
 
-  const invalidDescriptorResponse = response();
+  const invalidImagesResponse = response();
   await registerFace(request({
-    descriptor: Array(128).fill(3),
+    images: ['not-three-samples'],
     consentGranted: true,
-    consentTextVersion: 'v1',
-    modelVersion: 'model-v1'
-  }), invalidDescriptorResponse);
-  assert.equal(invalidDescriptorResponse.statusCode, 400);
+    consentTextVersion: 'v1'
+  }), invalidImagesResponse);
+  assert.equal(invalidImagesResponse.statusCode, 400);
 
   const missingConsentResponse = response();
   await registerFace(request({
-    descriptor: Array(128).fill(0.1),
+    images: encodedSamples(Array(128).fill(0.1)),
     consentGranted: false,
-    consentTextVersion: 'v1',
-    modelVersion: 'model-v1'
+    consentTextVersion: 'v1'
   }), missingConsentResponse);
   assert.equal(missingConsentResponse.statusCode, 400);
   assert.equal(memberQueryCount, 0);
@@ -187,9 +350,13 @@ test('face registration rejects invalid member IDs, descriptors, and missing con
 test('face removal verifies tenant membership and withdraws consent while deleting the template', async t => {
   const originalMemberFindOne = Member.findOne;
   const originalCredentialUpdate = BiometricCredential.updateMany;
+  const originalStartSession = mongoose.startSession;
+  const originalLockUpdateOne = BiometricEnrollmentLock.updateOne;
   t.after(() => {
     Member.findOne = originalMemberFindOne;
     BiometricCredential.updateMany = originalCredentialUpdate;
+    mongoose.startSession = originalStartSession;
+    BiometricEnrollmentLock.updateOne = originalLockUpdateOne;
   });
 
   let memberFilter;
@@ -204,6 +371,11 @@ test('face removal verifies tenant membership and withdraws consent while deleti
     credentialUpdate = update;
     return { modifiedCount: 1 };
   };
+  mongoose.startSession = async () => ({
+    withTransaction: callback => callback(),
+    endSession: async () => {}
+  });
+  BiometricEnrollmentLock.updateOne = async () => ({ acknowledged: true });
 
   const res = response();
   await removeFace(request(), res);
@@ -281,4 +453,59 @@ test('a member outside the authenticated gym cannot reveal or remove biometric d
   assert.equal(removeResponse.statusCode, 404);
   assert.equal(credentialLookupCount, 0);
   assert.equal(credentialUpdateCount, 0);
+});
+
+test('duplicate diagnostic is owner-only and returns only scoped member IDs', async t => {
+  const originalCredentialFind = BiometricCredential.find;
+  const descriptor = Array(128).fill(0);
+  const records = ['member-a', 'member-b'].map(memberId => ({
+    memberId,
+    modelVersion: 'face-api.js-v1-128d',
+    encryptedTemplate: encryptTemplate({
+      descriptor,
+      modelVersion: 'face-api.js-v1-128d'
+    })
+  }));
+  let credentialFilter;
+  BiometricCredential.find = filter => {
+    credentialFilter = filter;
+    return {
+      select() {
+        return {
+          then(resolve, reject) {
+            return Promise.resolve(records).then(resolve, reject);
+          }
+        };
+      }
+    };
+  };
+  t.after(() => { BiometricCredential.find = originalCredentialFind; });
+
+  const res = response();
+  await getFaceDuplicateReport(request(), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'REVIEW_REQUIRED');
+  assert.deepEqual(res.body.groups, [{
+    memberIds: ['member-a', 'member-b'],
+    status: 'REVIEW_REQUIRED'
+  }]);
+  assert.equal(credentialFilter.tenantId, tenantId);
+  assert.equal(credentialFilter.businessId, businessId);
+  assert.equal(credentialFilter.registrationStatus, 'Active');
+  assert.equal(Object.hasOwn(credentialFilter, 'consentStatus'), false);
+  assert.equal(Object.hasOwn(res.body.groups[0], 'encryptedTemplate'), false);
+
+  let lookupCount = 0;
+  BiometricCredential.find = () => {
+    lookupCount += 1;
+    throw new Error('Unauthenticated diagnostic must not query templates.');
+  };
+  const deniedResponse = response();
+  await getFaceDuplicateReport({
+    ...request(),
+    owner: { ...request().owner, role: 'staff' }
+  }, deniedResponse);
+  assert.equal(deniedResponse.statusCode, 403);
+  assert.equal(lookupCount, 0);
 });
