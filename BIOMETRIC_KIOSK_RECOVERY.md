@@ -165,6 +165,14 @@ Optional existing settings include `BIOMETRIC_KEY_VERSION`, `ALLOWED_ORIGINS`, a
 6. Keep `KIOSK_TOKEN_SECRET` and `BIOMETRIC_TEMPLATE_KEY` stable across redeployments.
 7. Do not expose secrets in logs or frontend environment files.
 
+### CPU-only ONNX Runtime install
+
+The backend pins `onnxruntime-node@1.23.2`. Version 1.22.0's Linux x64 postinstall selected the CUDA 12 NuGet package by default and its Linux manifest incorrectly requested a file under `runtimes/win-x64`. Version 1.23.2 corrects the Linux package path, but still defaults to requesting CUDA extras on Linux.
+
+Set the Render environment variable `ONNXRUNTIME_NODE_INSTALL=skip` before running the existing `npm install` build command. This skips those optional NuGet provider downloads. The 1.23.2 npm package already bundles `bin/napi-v6/linux/x64/libonnxruntime.so.1` and `onnxruntime_binding.node`, so CPU inference does not depend on the skipped CUDA/TensorRT provider files. Backend inference continues to explicitly select `executionProviders: ['cpu']`. Windows installs do not select a GPU manifest and do not require this variable.
+
+The local Windows install completed on Node 22.23.5 and `require('onnxruntime-node')` loaded version 1.23.2; npm reported zero vulnerabilities. The install emitted a non-fatal cleanup warning because the already-running old backend held its previous ONNX DLL open. All 163 backend tests passed, including initialization of the detector and SFace sessions and normalized 128-value output from SFace using a synthetic aligned test input. This is a runtime smoke test, not a real-person recognition test. Render Linux deployment was not run; do not treat the local tests or package contents as proof of a successful Render deploy. Redeploy and confirm the Render build skips NuGet downloads, starts the backend, and initializes both ONNX sessions.
+
 ## Vercel and Android Chrome
 
 - Deploy the frontend without secret environment values.
@@ -201,7 +209,7 @@ Verified locally on Windows with Node 22.23.5:
 - Synthetic blank images reject as `NO_FACE`.
 - Angular production build passed.
 - `npm audit` reported zero vulnerabilities in backend and frontend.
-- Dependency trees contain `onnxruntime-node@1.22.0` and `onnxruntime-web@1.22.0`.
+- Dependency trees contain `onnxruntime-node@1.23.2` and `onnxruntime-web@1.22.0`.
 - No TensorFlow.js or face-api.js package remains in either lockfile.
 - The final Angular bundle contains YuNet, YuNet license, and ONNX WASM runtime assets.
 - The production Render `/api/health` endpoint returned `Healthy` during a read-only check.

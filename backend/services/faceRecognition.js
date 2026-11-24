@@ -207,6 +207,7 @@ const initializeFaceRecognition = async () => {
       detectorSession = detector;
       recognizerSession = recognizer;
       state = 'ready';
+      console.info(`[biometric] ONNX CPU face models initialized (${FACE_MODEL_VERSION}).`);
       logDevelopmentDiagnostic('models-loaded', {
         modelVersion: FACE_MODEL_VERSION,
         backend: 'onnxruntime-cpu',
