@@ -1,5 +1,14 @@
 const path = require('node:path');
-const tf = require('@tensorflow/tfjs');
+let tf;
+let nativeBackendAvailable = false;
+let nativeBackendLoadError = null;
+try {
+  tf = require('@tensorflow/tfjs-node');
+  nativeBackendAvailable = true;
+} catch (error) {
+  tf = require('@tensorflow/tfjs');
+  nativeBackendLoadError = error;
+}
 const faceapi = require('face-api.js');
 const sharp = require('sharp');
 
@@ -11,6 +20,36 @@ const MIN_FACE_DIMENSION = 80;
 
 let state = 'uninitialized';
 let initializationPromise = null;
+
+const activateBackend = async backend => {
+  const selected = await tf.setBackend(backend);
+  await tf.ready();
+  if (!selected || tf.getBackend() !== backend) {
+    throw new Error(`TensorFlow backend "${backend}" did not become active.`);
+  }
+};
+
+const initializeTensorFlowBackend = async () => {
+  if (nativeBackendAvailable) {
+    try {
+      await activateBackend('tensorflow');
+      console.info('[biometric] TensorFlow native CPU backend initialized.');
+      return;
+    } catch (error) {
+      nativeBackendAvailable = false;
+      console.warn('[biometric] native CPU backend failed; falling back to JavaScript CPU.', {
+        code: error?.code || error?.name || 'NATIVE_BACKEND_INITIALIZATION_FAILED'
+      });
+    }
+  } else {
+    console.warn('[biometric] native CPU backend unavailable; using JavaScript CPU.', {
+      code: nativeBackendLoadError?.code || nativeBackendLoadError?.name || 'NATIVE_BACKEND_UNAVAILABLE'
+    });
+  }
+
+  await activateBackend('cpu');
+  console.info('[biometric] TensorFlow.js JavaScript CPU backend initialized.');
+};
 
 class FaceRecognitionError extends Error {
   constructor(code, message, status = 400) {
@@ -33,15 +72,14 @@ const initializeFaceRecognition = async () => {
   state = 'loading';
   initializationPromise = (async () => {
     try {
-      await tf.setBackend('cpu');
-      await tf.ready();
+      await initializeTensorFlowBackend();
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_DIRECTORY),
         faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_DIRECTORY),
         faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_DIRECTORY)
       ]);
       state = 'ready';
-      console.info('[biometric] face recognition models initialized.');
+      console.info(`[biometric] face recognition models initialized using ${tf.getBackend()}.`);
       return true;
     } catch (error) {
       state = 'unavailable';
@@ -165,6 +203,8 @@ const descriptorFromImages = async images => {
 module.exports = {
   FaceRecognitionError,
   initializeFaceRecognition,
+  getBackend: () => tf.getBackend(),
+  isNativeBackendAvailable: () => nativeBackendAvailable && tf.getBackend() === 'tensorflow',
   isReady,
   descriptorFromImage,
   descriptorFromImages,

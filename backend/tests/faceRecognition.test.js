@@ -7,6 +7,10 @@ const faceRecognition = require('../services/faceRecognition');
 test('backend face models initialize and reject an image without a face', { timeout: 120000 }, async () => {
   assert.equal(await faceRecognition.initializeFaceRecognition(), true);
   assert.equal(faceRecognition.isReady(), true);
+  assert.equal(
+    faceRecognition.getBackend(),
+    faceRecognition.isNativeBackendAvailable() ? 'tensorflow' : 'cpu'
+  );
 
   const image = await sharp({
     create: {
