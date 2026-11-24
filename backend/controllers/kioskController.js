@@ -111,6 +111,13 @@ exports.enrollMemberFace = async (req, res) => {
         message: 'This member already has a registered face. Please contact gym staff.'
       });
     }
+    if (outcome.status === 'migration-required') {
+      return res.status(409).json({
+        success: false,
+        code: 'FACE_REREGISTRATION_REQUIRED',
+        message: 'Face registration must be completed by gym staff using the current recognition model.'
+      });
+    }
     return res.status(201).json({
       success: true,
       code: 'FACE_REGISTERED',
@@ -422,7 +429,7 @@ exports.identifyFace = async (req, res) => {
     return res.json({
       success: true,
       member: { id: String(member._id), fullName: member.fullName },
-      matchConfidence: Number((1 - Math.min(best.distance, 1)).toFixed(4)),
+      matchConfidence: Number(best.similarity.toFixed(4)),
       matchToken
     });
   } catch (error) {

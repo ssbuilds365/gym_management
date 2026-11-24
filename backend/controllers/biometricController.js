@@ -49,9 +49,17 @@ exports.getFaceStatus = async (req, res) => {
     biometricType: 'Face',
     registrationStatus: 'Active',
     consentStatus: 'Granted'
-  }).sort({ updatedAt: -1 }).select('registrationStatus consentStatus consentAt consentTextVersion registeredAt updatedAt');
+  }).sort({ updatedAt: -1 }).select('registrationStatus modelVersion consentStatus consentAt consentTextVersion registeredAt updatedAt');
   if (!credential) {
     return res.json({ success: true, status: 'NotRegistered', registeredAt: null });
+  }
+  if (credential.modelVersion !== FACE_MODEL_VERSION) {
+    return res.json({
+      success: true,
+      status: 'MigrationRequired',
+      registeredAt: credential.registeredAt,
+      updatedAt: credential.updatedAt
+    });
   }
   return res.json({
     success: true,
@@ -120,6 +128,13 @@ exports.registerFace = async (req, res) => {
         success: false,
         code: 'FACE_ALREADY_REGISTERED',
         message: 'This member already has a registered face. Confirm an authorized replacement to continue.'
+      });
+    }
+    if (outcome.status === 'migration-required') {
+      return res.status(409).json({
+        success: false,
+        code: 'FACE_REREGISTRATION_REQUIRED',
+        message: 'This member must be re-enrolled with the current face recognition model.'
       });
     }
     return res.status(201).json({
@@ -237,7 +252,14 @@ exports.getFaceDuplicateReport = async (req, res) => {
       success: true,
       status: groups.length ? 'REVIEW_REQUIRED' : 'NO_DUPLICATES_FOUND',
       groups,
-      scannedTemplateCount: records.length
+      scannedTemplateCount: records.length,
+      migrationRequiredCount: await BiometricCredential.countDocuments({
+        tenantId: req.tenantId,
+        businessId: req.owner.businessId,
+        biometricType: 'Face',
+        registrationStatus: 'Active',
+        modelVersion: { $ne: FACE_MODEL_VERSION }
+      })
     });
   } catch (error) {
     if (error instanceof BiometricIdentityError) {

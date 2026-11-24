@@ -361,6 +361,7 @@
                                   member.biometricStatusLoading ? 'Checking…' :
                                   member.biometricStatus === 'Registered' ? 'Face Registered' :
                                   member.biometricStatus === 'NotRegistered' ? 'Face Not Registered' :
+                                  member.biometricStatus === 'MigrationRequired' ? 'Re-enrollment required' :
                                   'Status unavailable'
                                 }}
                             </span>
@@ -371,9 +372,11 @@
                                 (click)="loadFaceStatus(member._id)">Retry status</button>
                             <div class="face-row-actions">
                                 <button type="button" class="history-btn"
-                                    *ngIf="member.biometricStatus === 'NotRegistered'"
+                                    *ngIf="['NotRegistered', 'MigrationRequired'].includes(member.biometricStatus)"
                                     (click)="openFaceEnrollment(member)" [disabled]="member.status !== 'Active'"
-                                    title="Face registration requires an active member">Register Face</button>
+                                    title="Face registration requires an active member">
+                                    {{ member.biometricStatus === 'MigrationRequired' ? 'Re-enroll Face' : 'Register Face' }}
+                                </button>
                                 <button type="button" class="history-btn"
                                     *ngIf="member.biometricStatus === 'Registered'"
                                     (click)="openFaceEnrollment(member)" [disabled]="member.status !== 'Active'"
@@ -582,7 +585,7 @@
                     </label>
                     <div class="membership-footer-actions">
                         <button type="button" class="save-btn face-enrollment-start" (click)="startFaceEnrollment()" [disabled]="faceCameraActive || faceEnrollmentLoading || !faceConsentGranted">
-                            {{ faceStatus === 'Registered' ? 'Update Face' : 'Register Face' }}
+                            {{ faceStatus === 'Registered' || faceStatus === 'MigrationRequired' ? 'Update Face' : 'Register Face' }}
                         </button>
                         <button type="button" class="cancel-btn" *ngIf="faceStatus === 'Registered'" (click)="removeRegisteredFace()">Remove Face</button>
                     </div>

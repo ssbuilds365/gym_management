@@ -7,20 +7,29 @@ the deployment actions and external decisions below.
 
 ## Biometric identity security update (2026-11-23)
 
+- The biometric runtime was replaced on 2026-11-24 with ONNX Runtime CPU,
+  OpenCV Zoo YuNet 2026 detector, and SFace 2021 recognition model. Backend
+  model files are under `backend/models/onnx`; the frontend loads only the
+  YuNet model from `frontend/public/models`. The browser uses
+  `onnxruntime-web` WASM for detection; the backend performs detection and
+  embedding generation with `onnxruntime-node`.
 - Face enrollment through the Members tab and the kiosk enrollment controller
   now shares a backend comparison path. A gym-scoped transaction lock serializes
   enrollment, replacement, revocation, member deletion, and biometric check-in.
-  Cross-member matches use the existing 128D face-api descriptor format and
-  existing Euclidean acceptance distance (`0.45`); identification rejects
-  multiple-member matches and near-tied candidates.
+  SFace templates are normalized 128D vectors compared by cosine similarity
+  with the model's documented `0.363` threshold; identification rejects
+  multiple-member matches and near-tied candidates. Legacy face-api vectors
+  are not compared to SFace vectors.
 - Owner registration no longer silently overwrites an active template.
   Replacement requires owner authentication plus explicit confirmation, and
-  revokes/erases the old encrypted template in the same transaction that saves
-  the replacement. Deleting a member also revokes/erases current face templates.
+  is performed transactionally. A legacy encrypted template is preserved and
+  marked `MigrationRequired` when replaced; the member must explicitly
+  re-enroll with fresh consent. No production template was migrated or changed.
 - Identifier-only kiosk self-enrollment is disabled because a member ID or
   phone number is not proof of identity. Staff must verify identity and enroll
   from the authenticated Members page. The kiosk enrollment endpoint still
-  applies duplicate detection to any valid, scoped enrollment authorization.
+  requires its existing enrollment authorization; this change does not enable
+  the currently disabled identifier-only self-enrollment flow.
 - The owner-only `GET /api/biometric/duplicates` report and Members-page audit
   list affected member IDs for manual review. The report never returns
   embeddings and does not change templates or attendance history.
@@ -29,18 +38,14 @@ the deployment actions and external decisions below.
   `npm run migrate:biometric-duplicate-index` from `backend`. The per-gym lock
   collection is created on first use and relies on MongoDB's built-in unique
   `_id` index. No new environment variable is introduced.
-- Liveness/photo-replay detection is not supported by the current face-api.js
-  detector or recognition model. Frontend face detection and stability checks
-  are not liveness checks. The UI now discloses this limitation; do not treat a
-  camera preview or face match as proof of liveness.
-- Angular now captures and sends bounded JPEG camera samples; it no longer
-  generates or submits face embeddings. The backend runs the existing
-  face-api.js detector, landmark, and recognition models, then compares and
-  encrypts only server-generated descriptors. Uploaded frames are processed
-  transiently and are not written to storage. Recognition capability stays
-  disabled unless model initialization succeeds. Only the tiny face detector
-  weights remain public in the frontend; landmark and descriptor weights are
-  deployed with the backend.
+- Liveness/photo-replay detection is not supported by YuNet or SFace. Frontend
+  detection and stability checks are not liveness checks. The UI discloses this
+  limitation; do not treat a camera preview or face match as proof of liveness.
+- Angular uses YuNet only for camera guidance and sends bounded JPEG samples.
+  The backend generates SFace embeddings, encrypts them at rest, and processes
+  uploaded frames transiently without retaining them. Recognition remains
+  unavailable if ONNX model initialization fails. Old TensorFlow.js weights
+  and `face-api.js` / TensorFlow.js dependencies have been removed.
 
 ## Completed in this change
 
@@ -67,6 +72,23 @@ the deployment actions and external decisions below.
 - Angular shell and management modules: [app.ts](../frontend/src/app/app.ts), [app.html](../frontend/src/app/app.html), [management.ts](../frontend/src/app/services/management.ts)
 - Business-type migration: [migrateDanceAcademyBusinessType.js](../backend/scripts/migrateDanceAcademyBusinessType.js)
 - SecuGen evidence and blockers: [secugen-hu20-sdk-verification.md](./secugen-hu20-sdk-verification.md)
+
+## 2026-11-24 biometric runtime replacement files
+
+- Backend ONNX inference and model-versioned identity matching:
+  [faceRecognition.js](../backend/services/faceRecognition.js),
+  [biometricIdentity.js](../backend/services/biometricIdentity.js),
+  [BiometricCredential.js](../backend/models/BiometricCredential.js).
+- Backend routes/controllers and focused model, enrollment, and identification
+  tests were updated to use the ONNX runtime and preserve legacy encrypted
+  templates.
+- Browser detection, model/WASM asset configuration, and legacy re-enrollment
+  UI: [face-recognition.ts](../frontend/src/app/services/face-recognition.ts),
+  [angular.json](../frontend/angular.json), and
+  [members.html](../frontend/src/app/pages/members/members.html).
+- Backend uses `onnxruntime-node@1.22.0`; frontend uses
+  `onnxruntime-web@1.22.0`. TensorFlow.js and `face-api.js` packages and their
+  old detector/landmark/recognition weights were removed.
 
 ## Complete changed-file inventory
 
@@ -143,8 +165,9 @@ created SecuGen audit was not modified in this work.
 
 - Deploy the backend from `backend` and frontend from `frontend` using the
   existing Render/Vercel configuration.
-- Backend runtime must be Node.js `>=20.19.0` (required by the existing
-  Mongoose 9 dependency and the patched image processor).
+- Backend runtime is Node.js `22.x` (`backend/.node-version` pins `22.23.5`).
+  `onnxruntime-node@1.22.0` supplies the native CPU runtime; Render must install
+  the lockfile on Linux and load its Linux ONNX Runtime binary.
 - Keep existing `MONGODB_URI`, `JWT_SECRET`, and `FRONTEND_URL` server-side
   environment configuration intact.
 - Kiosk and current biometric enrollment require `BIOMETRIC_TEMPLATE_KEY`,
@@ -153,11 +176,11 @@ created SecuGen audit was not modified in this work.
   while encrypted templates exist; never put it in MongoDB, source control,
   Angular configuration, or logs. The legacy `BIOMETRIC_ENCRYPTION_KEY`
   utility setting does not configure kiosk enrollment.
-- Backend face inference uses the existing model files under
-  `backend/models/face-api` and the CPU TensorFlow.js runtime. Keep those model
-  assets in the backend deployment. No additional environment variable is
-  required; missing or failed model initialization disables face capabilities
-  without disabling QR attendance.
+- Backend face inference uses `onnxruntime-node@1.22.0` with YuNet and SFace
+  under `backend/models/onnx`; the Angular app uses `onnxruntime-web@1.22.0`
+  and the public YuNet model. No additional environment variable is required.
+  Keep the ONNX model files in their deployment packages. Missing or failed
+  initialization disables face capabilities without disabling QR attendance.
 - Review the deployment index policy for the new tenant-scoped indexes.
 - Biometric enrollment, replacement, revocation, and face check-in require
   MongoDB transactions and therefore a replica-set deployment. No new
@@ -167,21 +190,28 @@ created SecuGen audit was not modified in this work.
 
 ## Validation
 
-- Backend: `npm test` — **152 passed, 0 failed**. Includes face model startup,
+- Backend: Node 22 `node --test` — **158 passed, 0 failed**. Includes ONNX CPU
+  session startup, no-face and malformed-image rejection, normalized SFace
+  embedding inference, cosine matching, legacy-template preservation,
   invalid/no-face image rejection, duplicate enrollment, cross-tenant
   rejection, ambiguous identity rejection, revoked-template checks, expiry,
   and existing QR and attendance tests. Controller security tests use
   synthetic descriptors; they do not prove recognition accuracy for a real
   member's face.
-- Backend face inference: existing CPU models loaded successfully; a
-  synthetic blank JPEG was rejected as `NO_FACE`. No member image was used.
-- Dependency audit: `npm audit` — **0 vulnerabilities** after upgrading the
-  image decoder and spreadsheet parser, pinning patched transitive packages,
-  and replacing the development watcher with Node's built-in watch mode.
-- Angular: targeted kiosk and member biometric tests — **13 passed**.
+- Backend face inference: ONNX CPU sessions loaded successfully; SFace
+  generated a normalized 128-value vector from a test tensor and a synthetic
+  blank JPEG was rejected as `NO_FACE`. No real face was used, so detection and
+  identity accuracy were not end-to-end verified.
+- Dependency audit: `npm audit` reported **0 vulnerabilities** after removal of
+  face-api.js and its vulnerable TensorFlow.js dependency tree.
+- Angular: the biometric Members test is included among **105 passing** unit
+  tests; the full run also has 6 unrelated Settings tests failing because their
+  management-service mock lacks `listKioskCredentials`.
 - Angular production build: **passed**. It reports existing CommonJS
   optimization warnings in unrelated libraries.
-- The entire Angular test suite was not rerun in this follow-up.
+- Render Linux installation, Vercel deployment, Android Chrome, MongoDB
+  persistence, a real member enrollment, recognition, attendance marking, and
+  QR attendance were not exercised in this environment.
 - No connected HU20 capture, template extraction, enrollment, 1:1, or 1:N test
   was performed.
 

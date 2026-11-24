@@ -5,9 +5,10 @@ const BiometricCredential = require('../models/BiometricCredential');
 const BiometricEnrollmentLock = require('../models/BiometricEnrollmentLock');
 const { encryptTemplate, decryptTemplate } = require('../utils/biometricTemplateEncryption');
 const config = require('../config/env');
+const faceRecognition = require('./faceRecognition');
 
-const FACE_MODEL_VERSION = 'face-api.js-v1-128d';
-const FACE_MATCH_DISTANCE_THRESHOLD = 0.45;
+const FACE_MODEL_VERSION = faceRecognition.FACE_MODEL_VERSION;
+const FACE_MATCH_SIMILARITY_THRESHOLD = 0.363;
 const FACE_MATCH_AMBIGUITY_MARGIN = 0.05;
 
 class BiometricIdentityError extends Error {
@@ -22,15 +23,21 @@ class BiometricIdentityError extends Error {
 const isValidDescriptor = descriptor =>
   Array.isArray(descriptor) &&
   descriptor.length === 128 &&
-  descriptor.every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 2);
+  descriptor.every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 2) &&
+  descriptor.reduce((norm, value) => norm + value * value, 0) > 1e-12;
 
-const euclideanDistance = (left, right) => {
-  if (!isValidDescriptor(left) || !isValidDescriptor(right)) return Infinity;
-  let sum = 0;
+const cosineSimilarity = (left, right) => {
+  if (!isValidDescriptor(left) || !isValidDescriptor(right)) return -Infinity;
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
   for (let index = 0; index < left.length; index += 1) {
-    sum += (left[index] - right[index]) ** 2;
+    dot += left[index] * right[index];
+    leftNorm += left[index] * left[index];
+    rightNorm += right[index] * right[index];
   }
-  return Math.sqrt(sum);
+  if (leftNorm <= 1e-12 || rightNorm <= 1e-12) return -Infinity;
+  return Math.max(-1, Math.min(1, dot / Math.sqrt(leftNorm * rightNorm)));
 };
 
 const ensureGymLock = async (tenantId, businessId) => {
@@ -96,7 +103,8 @@ const getActiveCredentials = (tenantId, businessId, session, requireGrantedConse
     tenantId,
     businessId,
     biometricType: 'Face',
-    registrationStatus: 'Active'
+    registrationStatus: 'Active',
+    modelVersion: FACE_MODEL_VERSION
   };
   if (requireGrantedConsent) filter.consentStatus = 'Granted';
   const query = BiometricCredential.find(filter)
@@ -146,18 +154,22 @@ const enrollFaceTemplate = async ({
         memberId: member._id,
         biometricType: 'Face',
         registrationStatus: 'Active'
-      }).select('_id').session(session);
+      }).select('_id modelVersion').session(session);
       const ownCredential = await ownCredentialQuery;
       const credentials = await getActiveCredentials(tenantId, businessId, session, false);
       if (ownCredential && !replaceExisting) {
-        return { status: 'already-registered' };
+        return {
+          status: ownCredential.modelVersion === FACE_MODEL_VERSION
+            ? 'already-registered'
+            : 'migration-required'
+        };
       }
 
       for (const record of credentials) {
         if (String(record.memberId) === String(member._id)) continue;
         const registeredDescriptor = decryptCredential(record);
-        const distance = euclideanDistance(descriptor, registeredDescriptor);
-        if (distance <= FACE_MATCH_DISTANCE_THRESHOLD) {
+        const similarity = cosineSimilarity(descriptor, registeredDescriptor);
+        if (similarity >= FACE_MATCH_SIMILARITY_THRESHOLD) {
           return { status: 'duplicate-face' };
         }
       }
@@ -174,7 +186,22 @@ const enrollFaceTemplate = async ({
             businessId,
             memberId: member._id,
             biometricType: 'Face',
-            registrationStatus: 'Active'
+            registrationStatus: 'Active',
+            modelVersion: { $ne: FACE_MODEL_VERSION }
+          },
+          {
+            $set: { registrationStatus: 'MigrationRequired' }
+          },
+          { session }
+        );
+        await BiometricCredential.updateMany(
+          {
+            tenantId,
+            businessId,
+            memberId: member._id,
+            biometricType: 'Face',
+            registrationStatus: 'Active',
+            modelVersion: FACE_MODEL_VERSION
           },
           {
             $set: {
@@ -248,10 +275,10 @@ const compareFaceDescriptor = (descriptor, records) => {
   }
   const matches = records.map(record => ({
     record,
-    distance: euclideanDistance(descriptor, decryptCredential(record))
-  })).sort((left, right) => left.distance - right.distance);
+    similarity: cosineSimilarity(descriptor, decryptCredential(record))
+  })).sort((left, right) => right.similarity - left.similarity);
 
-  const qualified = matches.filter(match => match.distance <= FACE_MATCH_DISTANCE_THRESHOLD);
+  const qualified = matches.filter(match => match.similarity >= FACE_MATCH_SIMILARITY_THRESHOLD);
   const qualifiedMembers = new Set(qualified.map(match => String(match.record.memberId)));
   if (qualifiedMembers.size > 1) {
     return { status: 'duplicate-identity', matches: qualified };
@@ -259,7 +286,7 @@ const compareFaceDescriptor = (descriptor, records) => {
   if (qualified.length === 0) return { status: 'unknown', matches };
   if (
     matches.length > 1 &&
-    matches[1].distance - matches[0].distance < FACE_MATCH_AMBIGUITY_MARGIN &&
+    matches[0].similarity - matches[1].similarity < FACE_MATCH_AMBIGUITY_MARGIN &&
     String(matches[1].record.memberId) !== String(matches[0].record.memberId)
   ) {
     return { status: 'ambiguous', matches };
@@ -275,8 +302,8 @@ const findDuplicateIdentityGroups = records => {
     for (let rightIndex = leftIndex + 1; rightIndex < records.length; rightIndex += 1) {
       const right = records[rightIndex];
       if (String(left.memberId) === String(right.memberId)) continue;
-      const distance = euclideanDistance(leftDescriptor, decryptCredential(right));
-      if (distance > FACE_MATCH_DISTANCE_THRESHOLD) continue;
+      const similarity = cosineSimilarity(leftDescriptor, decryptCredential(right));
+      if (similarity < FACE_MATCH_SIMILARITY_THRESHOLD) continue;
 
       const leftMemberId = String(left.memberId);
       const rightMemberId = String(right.memberId);
@@ -315,13 +342,13 @@ const findDuplicateIdentityGroups = records => {
 
 module.exports = {
   FACE_MODEL_VERSION,
-  FACE_MATCH_DISTANCE_THRESHOLD,
+  FACE_MATCH_SIMILARITY_THRESHOLD,
   ensureGymLock,
   incrementGymLock,
   withBiometricGymLock,
   BiometricIdentityError,
   isValidDescriptor,
-  euclideanDistance,
+  cosineSimilarity,
   decryptCredential,
   getActiveCredentials,
   enrollFaceTemplate,

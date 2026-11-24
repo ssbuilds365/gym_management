@@ -17,6 +17,10 @@ const {
 } = require('../controllers/biometricController');
 const { encryptTemplate, decryptTemplate } = require('../utils/biometricTemplateEncryption');
 const faceRecognition = require('../services/faceRecognition');
+const {
+  FACE_MODEL_VERSION,
+  enrollFaceTemplate
+} = require('../services/biometricIdentity');
 
 const memberId = '507f1f77bcf86cd799439011';
 const tenantId = '507f1f77bcf86cd799439012';
@@ -70,6 +74,7 @@ test('face status is read only for a member in the owner tenant and business', a
       sort: () => ({
         select: async () => ({
           registrationStatus: 'Active',
+          modelVersion: FACE_MODEL_VERSION,
           consentStatus: 'Granted',
           registeredAt: new Date('2026-01-01T00:00:00.000Z')
         })
@@ -164,12 +169,14 @@ test('face registration rejects implicit overwrite and atomically revokes before
   BiometricCredential.updateMany = async (filter, update) => {
     const active = credentials.filter(item =>
       item.memberId === String(filter.memberId) &&
-      item.registrationStatus === 'Active'
+      item.registrationStatus === 'Active' &&
+      (!filter.modelVersion?.$ne || item.modelVersion !== filter.modelVersion.$ne) &&
+      (!filter.modelVersion || filter.modelVersion.$ne || item.modelVersion === filter.modelVersion)
     );
     for (const item of active) {
       originalEncryptedTemplate = item.encryptedTemplate;
       Object.assign(item, update.$set);
-      delete item.encryptedTemplate;
+      if (update.$unset?.encryptedTemplate) delete item.encryptedTemplate;
     }
     return { modifiedCount: active.length };
   };
@@ -222,6 +229,85 @@ test('face registration rejects implicit overwrite and atomically revokes before
     replacementDescriptor
   );
   assert.equal(Object.hasOwn(replacementResponse.body, 'descriptor'), false);
+});
+
+test('face model replacement retains the encrypted legacy template and marks it for migration', async t => {
+  const originals = {
+    memberFindOne: Member.findOne,
+    startSession: mongoose.startSession,
+    credentialFindOne: BiometricCredential.findOne,
+    credentialFind: BiometricCredential.find,
+    credentialCreate: BiometricCredential.create,
+    credentialUpdateMany: BiometricCredential.updateMany,
+    lockUpdateOne: BiometricEnrollmentLock.updateOne
+  };
+  const legacyModelVersion = 'face-api.js-v1-128d';
+  const legacyTemplate = encryptTemplate({
+    descriptor: [1, ...Array(127).fill(0)],
+    modelVersion: legacyModelVersion
+  });
+  const legacyCredential = {
+    _id: 'legacy-face-template',
+    memberId,
+    modelVersion: legacyModelVersion,
+    registrationStatus: 'Active',
+    encryptedTemplate: legacyTemplate
+  };
+  const changes = [];
+  t.after(() => {
+    Member.findOne = originals.memberFindOne;
+    mongoose.startSession = originals.startSession;
+    BiometricCredential.findOne = originals.credentialFindOne;
+    BiometricCredential.find = originals.credentialFind;
+    BiometricCredential.create = originals.credentialCreate;
+    BiometricCredential.updateMany = originals.credentialUpdateMany;
+    BiometricEnrollmentLock.updateOne = originals.lockUpdateOne;
+  });
+
+  Member.findOne = () => ({
+    select() { return this; },
+    session: async () => ({ _id: memberId })
+  });
+  mongoose.startSession = async () => ({
+    withTransaction: callback => callback(),
+    endSession: async () => {}
+  });
+  BiometricEnrollmentLock.updateOne = async () => ({ acknowledged: true });
+  BiometricCredential.findOne = () => ({
+    select() { return this; },
+    session: async () => legacyCredential
+  });
+  BiometricCredential.find = () => ({
+    select() { return this; },
+    session: async () => []
+  });
+  BiometricCredential.updateMany = async (filter, update) => {
+    changes.push({ filter, update });
+    if (filter.modelVersion?.$ne) {
+      legacyCredential.registrationStatus = update.$set.registrationStatus;
+    }
+    return { modifiedCount: 1 };
+  };
+  BiometricCredential.create = async (documents, options) => {
+    assert.ok(options?.session);
+    return documents.map(document => ({ _id: 'new-face-template', ...document }));
+  };
+
+  const result = await enrollFaceTemplate({
+    tenantId,
+    businessId,
+    memberId,
+    descriptor: [0, 1, ...Array(126).fill(0)],
+    consentTextVersion: 'face-consent-v2',
+    createdBy: ownerId,
+    replaceExisting: true
+  });
+
+  assert.equal(result.status, 'registered');
+  assert.equal(legacyCredential.registrationStatus, 'MigrationRequired');
+  assert.deepEqual(legacyCredential.encryptedTemplate, legacyTemplate);
+  assert.equal(changes[0].update.$unset, undefined);
+  assert.equal(changes[0].filter.modelVersion.$ne, FACE_MODEL_VERSION);
 });
 
 test('owner Members-tab enrollment rejects another member with the same face', async t => {
@@ -457,13 +543,14 @@ test('a member outside the authenticated gym cannot reveal or remove biometric d
 
 test('duplicate diagnostic is owner-only and returns only scoped member IDs', async t => {
   const originalCredentialFind = BiometricCredential.find;
-  const descriptor = Array(128).fill(0);
+  const originalCountDocuments = BiometricCredential.countDocuments;
+  const descriptor = [1, ...Array(127).fill(0)];
   const records = ['member-a', 'member-b'].map(memberId => ({
     memberId,
-    modelVersion: 'face-api.js-v1-128d',
+    modelVersion: FACE_MODEL_VERSION,
     encryptedTemplate: encryptTemplate({
       descriptor,
-      modelVersion: 'face-api.js-v1-128d'
+      modelVersion: FACE_MODEL_VERSION
     })
   }));
   let credentialFilter;
@@ -479,7 +566,11 @@ test('duplicate diagnostic is owner-only and returns only scoped member IDs', as
       }
     };
   };
-  t.after(() => { BiometricCredential.find = originalCredentialFind; });
+  BiometricCredential.countDocuments = async () => 0;
+  t.after(() => {
+    BiometricCredential.find = originalCredentialFind;
+    BiometricCredential.countDocuments = originalCountDocuments;
+  });
 
   const res = response();
   await getFaceDuplicateReport(request(), res);

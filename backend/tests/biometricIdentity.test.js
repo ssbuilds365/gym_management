@@ -22,39 +22,42 @@ const template = (memberId, descriptor) => ({
   })
 });
 
+const vectorWithCosine = similarity => [
+  similarity,
+  Math.sqrt(1 - similarity * similarity),
+  ...Array(126).fill(0)
+];
+
 test('face identification rejects unknown embeddings', () => {
-  const records = [template('member-a', Array(128).fill(1))];
-  const comparison = compareFaceDescriptor(Array(128).fill(0), records);
+  const input = [1, ...Array(127).fill(0)];
+  const records = [template('member-a', [0, 1, ...Array(126).fill(0)])];
+  const comparison = compareFaceDescriptor(input, records);
   assert.equal(comparison.status, 'unknown');
 });
 
 test('face identification rejects multiple member identities matching the same embedding', () => {
-  const descriptor = Array(128).fill(0);
+  const descriptor = [1, ...Array(127).fill(0)];
   const records = [
     template('member-a', descriptor),
-    template('member-b', Array(128).fill(0.01))
+    template('member-b', descriptor)
   ];
   const comparison = compareFaceDescriptor(descriptor, records);
   assert.equal(comparison.status, 'duplicate-identity');
 });
 
 test('face identification rejects a near-tied best and second-best match', () => {
-  const input = Array(128).fill(0);
-  const first = Array(128).fill(0);
-  first[0] = 0.44;
-  const second = Array(128).fill(0);
-  second[0] = -0.47;
+  const input = [1, ...Array(127).fill(0)];
   const comparison = compareFaceDescriptor(input, [
-    template('member-a', first),
-    template('member-b', second)
+    template('member-a', vectorWithCosine(0.38)),
+    template('member-b', vectorWithCosine(0.34))
   ]);
   assert.equal(comparison.status, 'ambiguous');
 });
 
-test('legacy duplicate diagnostic groups cross-member templates without exposing embeddings', () => {
-  const near = Array(128).fill(0);
-  const nearSecond = Array(128).fill(0.01);
-  const far = Array(128).fill(1);
+test('duplicate diagnostic groups current-model templates without exposing embeddings', () => {
+  const near = [1, ...Array(127).fill(0)];
+  const nearSecond = vectorWithCosine(0.99);
+  const far = [0, 1, ...Array(126).fill(0)];
   const groups = findDuplicateIdentityGroups([
     template('member-a', near),
     template('member-b', nearSecond),
@@ -69,7 +72,7 @@ test('legacy duplicate diagnostic groups cross-member templates without exposing
 });
 
 test('decryption or model incompatibility fails closed', () => {
-  const broken = template('member-a', Array(128).fill(0));
+  const broken = template('member-a', [1, ...Array(127).fill(0)]);
   broken.encryptedTemplate.authTag = crypto.randomBytes(16).toString('base64');
   assert.throws(() => compareFaceDescriptor(Array(128).fill(0), [broken]));
 });

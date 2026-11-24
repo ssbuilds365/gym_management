@@ -20,7 +20,7 @@ const tenantId = '507f1f77bcf86cd799439012';
 const businessId = '507f1f77bcf86cd799439013';
 const memberId = '507f1f77bcf86cd799439011';
 const credentialId = '507f1f77bcf86cd799439014';
-const descriptor = Array(128).fill(0);
+const descriptor = [1, ...Array(127).fill(0)];
 
 const response = () => ({
   statusCode: 200,
@@ -107,6 +107,7 @@ test('face identification returns a signed match bound to the exact active templ
     businessId,
     biometricType: 'Face',
     registrationStatus: 'Active',
+    modelVersion: FACE_MODEL_VERSION,
     consentStatus: 'Granted'
   });
   const match = jwt.verify(res.body.matchToken, KIOSK_TOKEN_SECRET, {
@@ -133,7 +134,7 @@ test('face identification rejects a legacy face mapped to multiple members witho
 
 test('face identification returns UNKNOWN_FACE when the descriptor has no qualifying match', async t => {
   const mocks = mockIdentifyModels(t, [
-    credential('507f1f77bcf86cd799439015', memberId, Array(128).fill(1))
+    credential('507f1f77bcf86cd799439015', memberId, [0, 1, ...Array(126).fill(0)])
   ]);
   const res = response();
   await identifyFace(request(), res);

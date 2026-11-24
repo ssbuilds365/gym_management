@@ -10,6 +10,7 @@ const { initializeFaceRecognition } = require('./services/faceRecognition');
 
 const dns = require('node:dns');
 const { buildCorsOptions } = require('./utils/corsConfig');
+const { configureProxyTrust } = require('./utils/proxyTrust');
 
 dns.setServers([
   '1.1.1.1',
@@ -17,6 +18,7 @@ dns.setServers([
 ]);
 
 const app = express();
+configureProxyTrust(app, config.nodeEnv);
 
 // Security Middleware
 app.use(helmet());

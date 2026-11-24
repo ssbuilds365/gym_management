@@ -1247,7 +1247,7 @@ totalDueAmount = 0;
       next: response => {
         if (this.faceStatusRequestIds.get(memberId) !== requestId) return;
         const status = response?.success === true &&
-          ['Registered', 'NotRegistered'].includes(response.status)
+          ['Registered', 'NotRegistered', 'MigrationRequired'].includes(response.status)
           ? response.status
           : 'Unavailable';
         const member = this.members.find(item => item._id === memberId);
@@ -1295,10 +1295,10 @@ totalDueAmount = 0;
       this.faceEnrollmentError = 'Camera access requires HTTPS and a supported browser.';
       return;
     }
-    this.faceReplacementAuthorized = this.faceStatus === 'Registered';
+    this.faceReplacementAuthorized = ['Registered', 'MigrationRequired'].includes(this.faceStatus);
     if (
       this.faceReplacementAuthorized &&
-      !confirm('Replace this member\'s current face template? The old template will be revoked after the new template passes verification.')
+      !confirm('Replace this member\'s current face template? The existing encrypted template will be retained as a legacy record.')
     ) {
       this.faceReplacementAuthorized = false;
       return;

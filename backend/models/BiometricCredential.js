@@ -13,7 +13,12 @@ const biometricCredentialSchema = new mongoose.Schema(
       keyVersion: { type: String, required: true }
     },
     modelVersion: { type: String, required: true },
-    registrationStatus: { type: String, enum: ['Active', 'Revoked'], default: 'Active', required: true },
+    registrationStatus: {
+      type: String,
+      enum: ['Active', 'MigrationRequired', 'Revoked'],
+      default: 'Active',
+      required: true
+    },
     consentStatus: { type: String, enum: ['Granted', 'Withdrawn'], default: 'Granted', required: true },
     consentTextVersion: { type: String, required: true },
     consentAt: { type: Date, required: true },

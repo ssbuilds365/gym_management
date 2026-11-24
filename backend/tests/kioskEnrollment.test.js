@@ -20,7 +20,7 @@ const tenantId = '507f1f77bcf86cd799439012';
 const businessId = '507f1f77bcf86cd799439013';
 const memberId = '507f1f77bcf86cd799439011';
 const secondMemberId = '507f1f77bcf86cd799439015';
-const descriptor = Array.from({ length: 128 }, (_, index) => index / 256);
+const descriptor = [1, ...Array(127).fill(0)];
 
 const makeResponse = () => ({
   statusCode: 200,
@@ -136,7 +136,9 @@ const mockEnrollmentModels = (t, initialCredentials = []) => {
         item.tenantId !== String(filter.tenantId) ||
         item.businessId !== String(filter.businessId) ||
         item.memberId !== String(filter.memberId) ||
-        item.registrationStatus !== 'Active'
+        item.registrationStatus !== 'Active' ||
+        (filter.modelVersion?.$ne && item.modelVersion === filter.modelVersion.$ne) ||
+        (filter.modelVersion && !filter.modelVersion.$ne && item.modelVersion !== filter.modelVersion)
       ) continue;
       Object.assign(item, update.$set);
       delete item.encryptedTemplate;
@@ -197,7 +199,7 @@ test('a different face can be enrolled to another member', async t => {
   const credentials = mockEnrollmentModels(t);
   const firstResponse = makeResponse();
   await enrollMemberFace(makeRequest(memberId), firstResponse);
-  const differentFace = Array(128).fill(1);
+  const differentFace = [0, 1, ...Array(126).fill(0)];
   const secondResponse = makeResponse();
   await enrollMemberFace(makeRequest(secondMemberId, differentFace), secondResponse);
 

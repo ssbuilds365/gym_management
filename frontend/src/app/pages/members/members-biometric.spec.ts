@@ -87,6 +87,22 @@ describe('Members face biometric actions', () => {
     expect(fixture.nativeElement.textContent).toContain('Member ID: 507f1f77bcf86cd799439011');
   });
 
+  it('marks legacy templates for explicit re-enrollment without treating them as current', () => {
+    memberService.getFaceStatus.mockReturnValue(of({
+      success: true,
+      status: 'MigrationRequired',
+      registeredAt: '2024-01-01T00:00:00.000Z'
+    }));
+    const component = fixture.componentInstance;
+    component.loadFaceStatus(member._id);
+    fixture.detectChanges();
+
+    expect(component.members[0].biometricStatus).toBe('MigrationRequired');
+    expect(fixture.nativeElement.textContent).toContain('Re-enrollment required');
+    expect(fixture.nativeElement.textContent).toContain('Re-enroll Face');
+    expect(fixture.nativeElement.textContent).not.toContain('Face Registered');
+  });
+
   it('makes the consent card clickable and gates face enrollment until consent is checked', () => {
     const component = fixture.componentInstance;
     component.showForm = true;
