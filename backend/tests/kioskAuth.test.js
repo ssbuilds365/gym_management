@@ -15,7 +15,12 @@ const BiometricCredential = require('../models/BiometricCredential');
 const Member = require('../models/Member');
 const MemberMembership = require('../models/MemberMembership');
 const config = require('../config/env');
-const { authenticateKiosk, faceCheckIn } = require('../controllers/kioskController');
+const {
+  authenticateKiosk,
+  faceCheckIn,
+  getKioskCapabilities
+} = require('../controllers/kioskController');
+const faceRecognition = require('../services/faceRecognition');
 const { createKioskCredential } = require('../controllers/biometricController');
 const { protectKiosk } = require('../middleware/kioskAuthMiddleware');
 const {
@@ -50,6 +55,35 @@ test('face templates are encrypted with authenticated encryption', () => {
   }));
 });
 
+test('kiosk capabilities require biometric configuration and model readiness', t => {
+  const originalIsReady = faceRecognition.isReady;
+  t.after(() => {
+    faceRecognition.isReady = originalIsReady;
+  });
+
+  faceRecognition.isReady = () => false;
+  assert.deepEqual(getKioskCapabilities({
+    faceAttendanceEnabled: true,
+    qrAttendanceEnabled: true
+  }), {
+    faceAttendanceEnabled: false,
+    faceEnrollmentEnabled: false,
+    faceEnrollmentRequiresStaff: false,
+    qrAttendanceEnabled: true
+  });
+
+  faceRecognition.isReady = () => true;
+  assert.deepEqual(getKioskCapabilities({
+    faceAttendanceEnabled: true,
+    qrAttendanceEnabled: true
+  }), {
+    faceAttendanceEnabled: true,
+    faceEnrollmentEnabled: false,
+    faceEnrollmentRequiresStaff: true,
+    qrAttendanceEnabled: true
+  });
+});
+
 const response = () => ({
   statusCode: 200,
   body: null,
@@ -82,12 +116,15 @@ test('credential creation stores only a hash scoped to the owner gym and authori
   const originalFindOne = KioskCredential.findOne;
   const originalUpdateOne = KioskCredential.updateOne;
   const originalBusinessFindById = Business.findById;
+  const originalFaceRecognitionIsReady = faceRecognition.isReady;
   t.after(() => {
     KioskCredential.create = originalCreate;
     KioskCredential.findOne = originalFindOne;
     KioskCredential.updateOne = originalUpdateOne;
     Business.findById = originalBusinessFindById;
+    faceRecognition.isReady = originalFaceRecognitionIsReady;
   });
+  faceRecognition.isReady = () => true;
 
   assert.equal(config.kioskTokenSecretConfigured, true);
   const tenantId = 'gym-tenant';

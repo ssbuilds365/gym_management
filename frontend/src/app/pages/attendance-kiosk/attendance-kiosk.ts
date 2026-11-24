@@ -147,7 +147,6 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.kioskSecret = '';
         this.changeDetector.markForCheck();
         this.startRenewalTimer();
-        if (this.faceEnabled) void this.startKioskCamera();
         void this.requestWakeLock();
       },
       error: error => {
@@ -168,7 +167,6 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.authorized = true;
         this.changeDetector.markForCheck();
         this.startRenewalTimer();
-        if (this.faceEnabled) void this.startKioskCamera();
         void this.requestWakeLock();
       },
       error: error => {
@@ -505,7 +503,6 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible' && this.authorized) {
       void this.requestWakeLock();
-      if (!this.cameraActive && this.faceEnabled) void this.startKioskCamera();
     }
   };
 

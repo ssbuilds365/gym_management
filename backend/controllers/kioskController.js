@@ -23,6 +23,20 @@ const faceRecognition = require('../services/faceRecognition');
 const { getAttendanceDayBounds } = require('../utils/attendanceDates');
 const { getMembershipExpiryWindow, isValidTimeZone } = require('../utils/membershipExpiry');
 
+const getKioskCapabilities = business => {
+  const faceServiceReady = Boolean(
+    config.biometricTemplateKeyConfigured && faceRecognition.isReady()
+  );
+  return {
+    faceAttendanceEnabled: Boolean(business?.faceAttendanceEnabled && faceServiceReady),
+    faceEnrollmentEnabled: false,
+    faceEnrollmentRequiresStaff: Boolean(business && faceServiceReady),
+    qrAttendanceEnabled: Boolean(business?.qrAttendanceEnabled)
+  };
+};
+
+exports.getKioskCapabilities = getKioskCapabilities;
+
 exports.identifyMemberForEnrollment = async (req, res) => {
   return res.status(403).json({
     success: false,
@@ -215,12 +229,7 @@ exports.authenticateKiosk = async (req, res) => {
         id: String(credential.businessId),
         name: business?.businessName || 'Gym',
         logoUrl: business?.logoUrl || '',
-        faceAttendanceEnabled: Boolean(
-          business?.faceAttendanceEnabled && config.biometricTemplateKeyConfigured
-        ),
-        faceEnrollmentEnabled: false,
-        faceEnrollmentRequiresStaff: Boolean(business && config.biometricTemplateKeyConfigured),
-        qrAttendanceEnabled: Boolean(business?.qrAttendanceEnabled)
+        ...getKioskCapabilities(business)
       }
     });
   } catch (error) {
@@ -324,16 +333,7 @@ exports.getKioskConfig = async (req, res) => {
       id: String(business._id),
       name: business.businessName,
       logoUrl: business.logoUrl || '',
-      faceAttendanceEnabled: Boolean(
-        business.faceAttendanceEnabled &&
-        config.biometricTemplateKeyConfigured &&
-        faceRecognition.isReady()
-      ),
-      faceEnrollmentEnabled: false,
-      faceEnrollmentRequiresStaff: Boolean(
-        config.biometricTemplateKeyConfigured && faceRecognition.isReady()
-      ),
-      qrAttendanceEnabled: Boolean(business.qrAttendanceEnabled),
+      ...getKioskCapabilities(business),
       timeZone: isValidTimeZone(business.timeZone) ? business.timeZone : 'Asia/Kolkata'
     }
   });

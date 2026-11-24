@@ -5,6 +5,7 @@ import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { sessionCookieInterceptor } from '../../interceptors/session-cookie.interceptor';
+import { CameraService } from '../../services/camera';
 import { AttendanceKiosk } from './attendance-kiosk';
 
 describe('AttendanceKiosk authorization', () => {
@@ -37,6 +38,8 @@ describe('AttendanceKiosk authorization', () => {
   it('switches to the kiosk after success, stores the token, and does not request camera access', async () => {
     fixture.detectChanges();
     const component = fixture.componentInstance;
+    const cameraOpen = vi.spyOn(TestBed.inject(CameraService), 'open')
+      .mockRejectedValue(new Error('Camera access must remain user initiated.'));
     component.credentialId = 'kiosk_test';
     component.kioskSecret = 'one-time-secret';
     component.authenticate();
@@ -56,7 +59,8 @@ describe('AttendanceKiosk authorization', () => {
       gym: {
         name: 'Test Gym',
         faceAttendanceEnabled: true,
-        faceEnrollmentEnabled: true,
+        faceEnrollmentEnabled: false,
+        faceEnrollmentRequiresStaff: true,
         qrAttendanceEnabled: true
       }
     });
@@ -64,12 +68,14 @@ describe('AttendanceKiosk authorization', () => {
 
     expect(component.authenticating).toBe(false);
     expect(component.authorized).toBe(true);
-    expect(component.faceEnrollmentEnabled).toBe(true);
+    expect(component.faceEnrollmentEnabled).toBe(false);
+    expect(component.faceEnrollmentRequiresStaff).toBe(true);
     expect(component.kioskSecret).toBe('');
     expect(sessionStorage.getItem('ssfm_kiosk_token')).toBe('short-lived-token');
     expect(fixture.nativeElement.querySelector('.authorization')).toBeNull();
     expect(fixture.nativeElement.querySelector('.kiosk-home')).not.toBeNull();
     expect(component.cameraActive).toBe(false);
+    expect(cameraOpen).not.toHaveBeenCalled();
   });
 
   it('prevents duplicate authorization requests and resets loading on failure', async () => {
