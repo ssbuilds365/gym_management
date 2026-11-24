@@ -34,7 +34,11 @@ describe('BusinessSettings password controls', () => {
           useValue: {
             getSettings: () => of({ business: { logoUrl: 'https://cdn.example.com/old-logo.webp' } }),
             uploadBusinessLogo,
-            removeBusinessLogo
+            removeBusinessLogo,
+            listKioskCredentials: () => of({ success: true, credentials: [] }),
+            createKioskCredential: vi.fn(),
+            rotateKioskCredential: vi.fn(),
+            revokeKioskCredential: vi.fn()
           }
         }
       ]

@@ -1,14 +1,24 @@
 import { Injectable } from '@angular/core';
 import * as ort from 'onnxruntime-web/wasm';
+import { environment } from '../../environments/environment';
 
 type FaceBox = { x: number; y: number; width: number; height: number };
 type FaceDetection = FaceBox & { x1: number; y1: number; x2: number; y2: number; score: number };
 
 const MODEL_URL = '/models/face_detection_yunet_2026may.onnx';
 const MAX_DETECTOR_DIMENSION = 640;
+const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
+const MAX_CAPTURE_DATA_URL_LENGTH = Math.ceil(MAX_CAPTURE_BYTES * 4 / 3) + 32;
+const ENROLLMENT_SAMPLE_COUNT = 3;
 const FEATURE_STRIDES = [8, 16, 32];
 const SCORE_THRESHOLD = 0.9;
 const NMS_THRESHOLD = 0.3;
+
+const logDevelopmentDiagnostic = (event: string, details: Record<string, unknown> = {}): void => {
+  if (!environment.production) {
+    console.info('[biometric-debug]', event, details);
+  }
+};
 
 const getFloatData = (tensor: ort.Tensor | undefined): Float32Array | undefined =>
   tensor?.type === 'float32' && tensor.data instanceof Float32Array
@@ -58,7 +68,14 @@ export class FaceRecognitionService {
           throw new Error('Configured YuNet model inputs or outputs do not match.');
         }
         this.session = session;
-      } catch {
+        logDevelopmentDiagnostic('detector-model-loaded', {
+          model: 'YuNet',
+          backend: 'onnxruntime-web-wasm'
+        });
+      } catch (error) {
+        logDevelopmentDiagnostic('detector-model-load-failed', {
+          code: error instanceof Error ? error.name : 'MODEL_LOAD_FAILED'
+        });
         this.loading = null;
         throw new FaceRecognitionError(
           'MODEL_LOAD_FAILED',
@@ -80,6 +97,17 @@ export class FaceRecognitionService {
     await previous;
     try {
       const detections = await this.detectFaces(video);
+      logDevelopmentDiagnostic('browser-face-detection-complete', {
+        count: detections.length,
+        frameWidth: video.videoWidth,
+        frameHeight: video.videoHeight,
+        faceCrop: detections.length === 1
+          ? {
+              width: Math.round(detections[0].width),
+              height: Math.round(detections[0].height)
+            }
+          : null
+      });
       if (detections.length !== 1) return null;
       const { x, y, width, height } = detections[0];
       return { x, y, width, height };
@@ -216,9 +244,33 @@ export class FaceRecognitionService {
 
     try {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/jpeg', 0.85);
+      const image = canvas.toDataURL('image/jpeg', 0.85);
+      logDevelopmentDiagnostic('camera-frame-captured', {
+        width: canvas.width,
+        height: canvas.height,
+        encodedLength: image.length
+      });
+      return image;
     } catch {
       throw new FaceRecognitionError('INVALID_CAPTURE', 'Camera image could not be captured.');
+    }
+  }
+
+  validateEnrollmentSamples(samples: unknown): void {
+    const jpegDataUrl = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
+    if (
+      !Array.isArray(samples) ||
+      samples.length !== ENROLLMENT_SAMPLE_COUNT ||
+      samples.some((sample: unknown) =>
+        typeof sample !== 'string' ||
+        sample.length > MAX_CAPTURE_DATA_URL_LENGTH ||
+        !jpegDataUrl.test(sample)
+      )
+    ) {
+      throw new FaceRecognitionError(
+        'INVALID_CAPTURE',
+        'Three valid camera images are required. Capture the face again and retry.'
+      );
     }
   }
 

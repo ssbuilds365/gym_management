@@ -20,11 +20,7 @@ class BiometricIdentityError extends Error {
   }
 }
 
-const isValidDescriptor = descriptor =>
-  Array.isArray(descriptor) &&
-  descriptor.length === 128 &&
-  descriptor.every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 2) &&
-  descriptor.reduce((norm, value) => norm + value * value, 0) > 1e-12;
+const isValidDescriptor = faceRecognition.isValidDescriptor;
 
 const cosineSimilarity = (left, right) => {
   if (!isValidDescriptor(left) || !isValidDescriptor(right)) return -Infinity;
@@ -122,6 +118,12 @@ const enrollFaceTemplate = async ({
   replaceExisting = false
 }) => {
   if (!isValidDescriptor(descriptor)) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[biometric-debug]', JSON.stringify({
+        event: 'persistence-descriptor-rejected',
+        ...faceRecognition.inspectDescriptor(descriptor)
+      }));
+    }
     throw new BiometricIdentityError(
       'INVALID_FACE_DESCRIPTOR',
       'A valid 128-value face template is required.',

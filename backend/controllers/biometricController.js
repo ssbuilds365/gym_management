@@ -106,7 +106,9 @@ exports.registerFace = async (req, res) => {
     });
     if (!member) return res.status(404).json({ success: false, message: 'Active member not found.' });
 
-    const descriptor = await faceRecognition.descriptorFromImages(images);
+    const descriptor = faceRecognition.assertGeneratedDescriptor(
+      await faceRecognition.descriptorFromImages(images)
+    );
     const outcome = await enrollFaceTemplate({
       tenantId: req.tenantId,
       businessId: req.owner.businessId,
@@ -148,7 +150,7 @@ exports.registerFace = async (req, res) => {
       const message = error.code === 'MEMBER_NOT_FOUND'
         ? 'Active member not found.'
         : error.code === 'INVALID_FACE_DESCRIPTOR'
-          ? 'A valid 128-value face template is required.'
+          ? 'The generated face template failed backend validation. Check backend biometric diagnostics.'
           : error.code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE'
             ? 'Face registration is temporarily unavailable. Please contact gym staff.'
             : error.code === 'BIOMETRIC_SAVE_FAILED'
@@ -165,6 +167,8 @@ exports.registerFace = async (req, res) => {
         ? 'Face registration is temporarily unavailable. Please contact gym staff.'
         : error.code === 'NO_FACE' || error.code === 'MULTIPLE_FACES' || error.code === 'FACE_TOO_SMALL'
           ? 'Unable to process face. Please try again.'
+          : error.code === 'INVALID_FACE_DESCRIPTOR'
+            ? 'The recognition model did not produce a valid 128-value face template.'
           : error.code === 'INVALID_FACE_IMAGES' || error.code === 'INVALID_FACE_IMAGE'
             ? 'Unable to process face. Please try again.'
             : 'Face registration is temporarily unavailable. Please contact gym staff.';

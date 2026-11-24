@@ -1359,6 +1359,7 @@ totalDueAmount = 0;
         }
       }
 
+      this.faceRecognition.validateEnrollmentSamples(samples);
       this.faceEnrollmentMessage = 'Three samples captured · Processing securely…';
       this.changeDetector.markForCheck();
       const response = await firstValueFrom(this.memberService.registerFace(
@@ -1432,8 +1433,18 @@ totalDueAmount = 0;
       return 'This member already has a registered face. Confirm an authorized replacement to continue.';
     }
     if (code === 'MEMBER_NOT_FOUND') return 'Member not found.';
+    if (code === 'INVALID_FACE_DESCRIPTOR') {
+      const safeBackendMessage = error?.error?.message;
+      if ([
+        'A valid 128-value face template is required.',
+        'The recognition model did not produce a valid 128-value face template.',
+        'The generated face template failed backend validation. Check backend biometric diagnostics.'
+      ].includes(safeBackendMessage)) {
+        return safeBackendMessage;
+      }
+      return 'Face template generation failed. Please retry or contact gym staff.';
+    }
     if (
-      code === 'INVALID_FACE_DESCRIPTOR' ||
       code === 'INVALID_FACE_IMAGE' ||
       code === 'INVALID_FACE_IMAGES' ||
       code === 'INVALID_FACE_TEMPLATE' ||

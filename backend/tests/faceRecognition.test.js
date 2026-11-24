@@ -32,6 +32,19 @@ test('backend face inference rejects arbitrary image encodings', async () => {
   );
 });
 
+test('YuNet receives decoded RGB camera pixels in BGR model order', async () => {
+  const { tensor, inputWidth, inputHeight } = await faceRecognition.buildDetectorInput({
+    data: Buffer.from([11, 22, 33]),
+    width: 1,
+    height: 1
+  });
+  const planeSize = inputWidth * inputHeight;
+
+  assert.equal(tensor.data[0], 33);
+  assert.equal(tensor.data[planeSize], 22);
+  assert.equal(tensor.data[planeSize * 2], 11);
+});
+
 test('SFace CPU inference returns a normalized 128-value embedding', async () => {
   assert.equal(await faceRecognition.initializeFaceRecognition(), true);
   const descriptor = await faceRecognition.embeddingFromAlignedRgb(
@@ -40,6 +53,39 @@ test('SFace CPU inference returns a normalized 128-value embedding', async () =>
   assert.equal(descriptor.length, 128);
   assert.ok(descriptor.every(Number.isFinite));
   assert.ok(Math.abs(Math.hypot(...descriptor) - 1) < 1e-5);
+  assert.equal(faceRecognition.isNormalizedDescriptor(descriptor), true);
+});
+
+test('face templates reject wrong dimensions, non-finite values, and zero vectors', () => {
+  assert.equal(faceRecognition.isValidDescriptor(Array(127).fill(0.1)), false);
+  assert.equal(faceRecognition.isValidDescriptor([NaN, ...Array(127).fill(0)]), false);
+  assert.equal(faceRecognition.isValidDescriptor([Infinity, ...Array(127).fill(0)]), false);
+  assert.equal(faceRecognition.isValidDescriptor(Array(128).fill(0)), false);
+  assert.throws(
+    () => faceRecognition.assertGeneratedDescriptor(Array(128).fill(0.1)),
+    error => error.code === 'INVALID_FACE_DESCRIPTOR' && error.status === 503
+  );
+});
+
+test('descriptor diagnostics identify only safe validation metadata', () => {
+  const cases = [
+    [Array(127).fill(0.1), 'wrong-dimension'],
+    [[NaN, ...Array(127).fill(0)], 'non-finite-or-nonnumeric-value'],
+    [[3, ...Array(127).fill(0)], 'value-out-of-range'],
+    [Array(128).fill(0), 'zero-or-invalid-norm']
+  ];
+  const sparseDescriptor = Array(128).fill(0.1);
+  delete sparseDescriptor[4];
+  cases.push([sparseDescriptor, 'non-finite-or-nonnumeric-value']);
+  cases.push([[undefined, ...Array(127).fill(0.1)], 'non-finite-or-nonnumeric-value']);
+
+  for (const [descriptor, expectedReason] of cases) {
+    const diagnostics = faceRecognition.inspectDescriptor(descriptor);
+    assert.equal(diagnostics.valid, false);
+    assert.equal(diagnostics.reason, expectedReason);
+    assert.equal(Object.hasOwn(diagnostics, 'descriptor'), false);
+    assert.equal(Object.hasOwn(diagnostics, 'values'), false);
+  }
 });
 
 test('face model alignment rejects malformed landmark coordinates', () => {

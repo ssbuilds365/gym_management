@@ -173,6 +173,28 @@ describe('AttendanceKiosk authorization', () => {
     expect(message).not.toContain('internal detail');
   });
 
+  it('explains invalid model descriptor responses without exposing internal details', () => {
+    const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
+      error: { code: 'INVALID_FACE_DESCRIPTOR', message: 'internal detail' },
+      status: 503
+    });
+
+    expect(message).toBe('Face template generation failed. Please retry or contact gym staff.');
+    expect(message).not.toContain('internal detail');
+  });
+
+  it('shows the allowlisted backend descriptor validation message', () => {
+    const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
+      error: {
+        code: 'INVALID_FACE_DESCRIPTOR',
+        message: 'A valid 128-value face template is required.'
+      },
+      status: 400
+    });
+
+    expect(message).toBe('A valid 128-value face template is required.');
+  });
+
   it('clears an expired stored token and asks for reauthorization', async () => {
     sessionStorage.setItem('ssfm_kiosk_token', 'expired-token');
     fixture.detectChanges();

@@ -27,7 +27,8 @@ const tenantId = '507f1f77bcf86cd799439012';
 const businessId = '507f1f77bcf86cd799439013';
 const ownerId = '507f1f77bcf86cd799439014';
 const originalDescriptorFromImages = faceRecognition.descriptorFromImages;
-faceRecognition.descriptorFromImages = async images => JSON.parse(images[0]);
+faceRecognition.descriptorFromImages = async images =>
+  faceRecognition.normalizeDescriptor(JSON.parse(images[0]));
 test.after(() => {
   faceRecognition.descriptorFromImages = originalDescriptorFromImages;
 });
@@ -222,13 +223,38 @@ test('face registration rejects implicit overwrite and atomically revokes before
   assert.equal(credentials[1].createdBy, ownerId);
   assert.deepEqual(
     decryptTemplate(originalEncryptedTemplate).descriptor,
-    descriptor
+    faceRecognition.normalizeDescriptor(descriptor)
   );
   assert.deepEqual(
     decryptTemplate(credentials[1].encryptedTemplate).descriptor,
-    replacementDescriptor
+    faceRecognition.normalizeDescriptor(replacementDescriptor)
   );
   assert.equal(Object.hasOwn(replacementResponse.body, 'descriptor'), false);
+});
+
+test('staff registration rejects an invalid model descriptor before persistence', async t => {
+  const originalDescriptorFromImages = faceRecognition.descriptorFromImages;
+  const originalMemberFindOne = Member.findOne;
+  t.after(() => {
+    faceRecognition.descriptorFromImages = originalDescriptorFromImages;
+    Member.findOne = originalMemberFindOne;
+  });
+  faceRecognition.descriptorFromImages = async () => Array(128).fill(0);
+  Member.findOne = async () => ({ _id: memberId });
+
+  const res = response();
+  await registerFace(request({
+    images: encodedSamples([1, ...Array(127).fill(0)]),
+    consentGranted: true,
+    consentTextVersion: 'face-consent-v1'
+  }), res);
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.code, 'INVALID_FACE_DESCRIPTOR');
+  assert.equal(
+    res.body.message,
+    'The recognition model did not produce a valid 128-value face template.'
+  );
 });
 
 test('face model replacement retains the encrypted legacy template and marks it for migration', async t => {

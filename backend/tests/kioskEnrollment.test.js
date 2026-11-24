@@ -146,7 +146,8 @@ const mockEnrollmentModels = (t, initialCredentials = []) => {
     }
     return { modifiedCount };
   };
-  faceRecognition.descriptorFromImages = async images => JSON.parse(images[0]);
+  faceRecognition.descriptorFromImages = async images =>
+    faceRecognition.normalizeDescriptor(JSON.parse(images[0]));
   t.after(() => {
     faceRecognition.descriptorFromImages = originalDescriptorFromImages;
     mongoose.startSession = originals.startSession;
@@ -175,6 +176,18 @@ test('kiosk enrollment persists only an encrypted, gym-scoped template', async t
   assert.equal(credentials[0].consentStatus, 'Granted');
   assert.equal(Object.hasOwn(credentials[0].encryptedTemplate, 'descriptor'), false);
   assert.deepEqual(decryptTemplate(credentials[0].encryptedTemplate).descriptor, descriptor);
+});
+
+test('kiosk enrollment rejects an invalid model descriptor before persistence', async t => {
+  const credentials = mockEnrollmentModels(t);
+  faceRecognition.descriptorFromImages = async () => Array(128).fill(0);
+  const res = makeResponse();
+
+  await enrollMemberFace(makeRequest(), res);
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.code, 'INVALID_FACE_DESCRIPTOR');
+  assert.equal(credentials.length, 0);
 });
 
 test('same face cannot be registered to a second member in the same gym', async t => {

@@ -87,8 +87,11 @@ exports.enrollMemberFace = async (req, res) => {
         message: 'Face registration is temporarily unavailable. Please contact gym staff.'
       });
     }
-    stage = 'identity-check';
-    const descriptor = await faceRecognition.descriptorFromImages(images);
+    stage = 'descriptor-generation';
+    const descriptor = faceRecognition.assertGeneratedDescriptor(
+      await faceRecognition.descriptorFromImages(images)
+    );
+    stage = 'persistence';
     const outcome = await enrollFaceTemplate({
       tenantId: req.kiosk.tenantId,
       businessId: req.kiosk.businessId,
@@ -127,8 +130,10 @@ exports.enrollMemberFace = async (req, res) => {
     if (error instanceof BiometricIdentityError) {
       const message = error.code === 'MEMBER_NOT_FOUND'
         ? 'Member not found.'
-        : error.code === 'INVALID_FACE_DESCRIPTOR' || error.code === 'INVALID_FACE_IMAGE'
-          ? 'Unable to process face. Please try again.'
+        : error.code === 'INVALID_FACE_DESCRIPTOR'
+          ? 'The generated face template failed backend validation. Check backend biometric diagnostics.'
+          : error.code === 'INVALID_FACE_IMAGE'
+            ? 'Unable to process face. Please try again.'
           : error.code === 'BIOMETRIC_ENCRYPTION_UNAVAILABLE'
             ? 'Face registration is temporarily unavailable. Please contact gym staff.'
             : 'Face registration is temporarily unavailable. Please contact gym staff.';
@@ -141,6 +146,8 @@ exports.enrollMemberFace = async (req, res) => {
     if (error instanceof faceRecognition.FaceRecognitionError) {
       const message = error.code === 'NO_FACE' || error.code === 'MULTIPLE_FACES' || error.code === 'FACE_TOO_SMALL'
         ? 'Unable to process face. Please try again.'
+        : error.code === 'INVALID_FACE_DESCRIPTOR'
+          ? 'The recognition model did not produce a valid 128-value face template.'
         : error.code === 'INVALID_FACE_IMAGES' || error.code === 'INVALID_FACE_IMAGE'
           ? 'Unable to process face. Please try again.'
           : 'Face registration is temporarily unavailable. Please contact gym staff.';

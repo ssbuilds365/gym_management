@@ -28,6 +28,12 @@ let detectorSession = null;
 let recognizerSession = null;
 let inferenceQueue = Promise.resolve();
 
+const logDevelopmentDiagnostic = (event, details = {}) => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.info('[biometric-debug]', JSON.stringify({ event, ...details }));
+  }
+};
+
 class FaceRecognitionError extends Error {
   constructor(code, message, status = 400) {
     super(message);
@@ -37,30 +43,125 @@ class FaceRecognitionError extends Error {
   }
 }
 
-const isValidDescriptor = descriptor =>
-  Array.isArray(descriptor) &&
-  descriptor.length === 128 &&
-  descriptor.every(value => Number.isFinite(value) && Math.abs(value) <= 2);
+const inspectDescriptor = descriptor => {
+  if (!Array.isArray(descriptor)) {
+    return {
+      valid: false,
+      reason: 'not-an-array',
+      length: null,
+      allFinite: false,
+      withinRange: false,
+      nonZero: false
+    };
+  }
+
+  const values = Array.from(descriptor);
+  const allFinite = values.every(value =>
+    typeof value === 'number' && Number.isFinite(value)
+  );
+  const withinRange = allFinite && values.every(value => Math.abs(value) <= 2);
+  const squaredNorm = allFinite
+    ? values.reduce((norm, value) => norm + value * value, 0)
+    : NaN;
+  const nonZero = Number.isFinite(squaredNorm) && squaredNorm > 1e-12;
+  const reason = descriptor.length !== 128
+    ? 'wrong-dimension'
+    : !allFinite
+      ? 'non-finite-or-nonnumeric-value'
+      : !withinRange
+        ? 'value-out-of-range'
+        : !nonZero
+          ? 'zero-or-invalid-norm'
+          : null;
+
+  return {
+    valid: reason === null,
+    reason,
+    length: descriptor.length,
+    allFinite,
+    withinRange,
+    nonZero
+  };
+};
+
+const isValidDescriptor = descriptor => inspectDescriptor(descriptor).valid;
+
+const isNormalizedDescriptor = descriptor =>
+  isValidDescriptor(descriptor) &&
+  Math.abs(Math.hypot(...descriptor) - 1) <= 1e-3;
+
+const assertGeneratedDescriptor = descriptor => {
+  if (!isNormalizedDescriptor(descriptor)) {
+    logDevelopmentDiagnostic('generated-descriptor-rejected', {
+      ...inspectDescriptor(descriptor),
+      normalized: false
+    });
+    throw new FaceRecognitionError(
+      'INVALID_FACE_DESCRIPTOR',
+      'The recognition model did not produce a valid 128-value face template.',
+      503
+    );
+  }
+  return descriptor;
+};
 
 const normalizeDescriptor = descriptor => {
   if (!Array.isArray(descriptor) || descriptor.length !== 128) {
+    logDevelopmentDiagnostic('embedding-output-rejected', {
+      stage: 'dimension-check',
+      length: Array.isArray(descriptor) ? descriptor.length : null,
+      allFinite: false,
+      reason: 'wrong-dimension'
+    });
     throw new FaceRecognitionError(
       'INVALID_FACE_DESCRIPTOR',
-      'The face template could not be generated.'
+      'The face template could not be generated.',
+      503
     );
   }
-  const norm = Math.sqrt(descriptor.reduce((sum, value) => sum + value * value, 0));
-  if (!Number.isFinite(norm) || norm <= 1e-12) {
+  if (!Array.from(descriptor).every(value =>
+    typeof value === 'number' && Number.isFinite(value)
+  )) {
+    logDevelopmentDiagnostic('embedding-output-rejected', {
+      stage: 'finite-value-check',
+      ...inspectDescriptor(descriptor)
+    });
     throw new FaceRecognitionError(
       'INVALID_FACE_DESCRIPTOR',
-      'The face template could not be generated.'
+      'The face template could not be generated.',
+      503
+    );
+  }
+  const norm = Math.sqrt(
+    Array.from(descriptor).reduce((sum, value) => sum + value * value, 0)
+  );
+  if (!Number.isFinite(norm) || norm <= 1e-12) {
+    logDevelopmentDiagnostic('embedding-output-rejected', {
+      stage: 'normalization',
+      length: descriptor.length,
+      allFinite: true,
+      reason: Number.isFinite(norm) ? 'zero-or-invalid-norm' : 'non-finite-norm'
+    });
+    throw new FaceRecognitionError(
+      'INVALID_FACE_DESCRIPTOR',
+      'The face template could not be generated.',
+      503
     );
   }
   const normalized = descriptor.map(value => value / norm);
-  if (!isValidDescriptor(normalized)) {
+  const inspection = inspectDescriptor(normalized);
+  logDevelopmentDiagnostic(
+    inspection.valid ? 'descriptor-generated' : 'embedding-output-rejected',
+    {
+      ...inspection,
+      normalized: inspection.valid && Math.abs(Math.hypot(...normalized) - 1) <= 1e-3
+    }
+  );
+  if (!inspection.valid) {
     throw new FaceRecognitionError(
       'INVALID_FACE_DESCRIPTOR',
-      'The face template could not be generated.'
+      'The face template could not be generated.',
+      503
     );
   }
   return normalized;
@@ -106,7 +207,12 @@ const initializeFaceRecognition = async () => {
       detectorSession = detector;
       recognizerSession = recognizer;
       state = 'ready';
-      console.info(`[biometric] ONNX CPU face models initialized (${FACE_MODEL_VERSION}).`);
+      logDevelopmentDiagnostic('models-loaded', {
+        modelVersion: FACE_MODEL_VERSION,
+        backend: 'onnxruntime-cpu',
+        detectorLoaded: true,
+        recognizerLoaded: true
+      });
       return true;
     } catch (error) {
       state = 'unavailable';
@@ -167,6 +273,11 @@ const decodeImage = async image => {
   ) {
     throw new FaceRecognitionError('INVALID_FACE_IMAGE', 'The camera image is invalid or too small.');
   }
+  logDevelopmentDiagnostic('camera-image-decoded', {
+    width: info.width,
+    height: info.height,
+    channels: info.channels
+  });
   return { data, width: info.width, height: info.height };
 };
 
@@ -193,9 +304,9 @@ const buildDetectorInput = async ({ data, width, height }) => {
     for (let x = 0; x < resizedWidth; x += 1) {
       const sourceIndex = (y * resizedWidth + x) * 3;
       const targetIndex = y * inputWidth + x;
-      inputData[targetIndex] = resized.data[sourceIndex];
+      inputData[targetIndex] = resized.data[sourceIndex + 2];
       inputData[planeSize + targetIndex] = resized.data[sourceIndex + 1];
-      inputData[planeSize * 2 + targetIndex] = resized.data[sourceIndex + 2];
+      inputData[planeSize * 2 + targetIndex] = resized.data[sourceIndex];
     }
   }
 
@@ -396,6 +507,11 @@ const embeddingFromAlignedRgb = async alignedRgb => {
     inputData[planeSize + pixel] = alignedRgb[pixel * 3 + 1];
     inputData[planeSize * 2 + pixel] = alignedRgb[pixel * 3 + 2];
   }
+  logDevelopmentDiagnostic('face-crop-prepared', {
+    width: 112,
+    height: 112,
+    channels: 3
+  });
   const result = await recognizerSession.run({
     data: new ort.Tensor('float32', inputData, [1, 3, 112, 112])
   });
@@ -413,6 +529,11 @@ const descriptorFromImage = async imageDataUrl => {
   const image = await decodeImage(imageDataUrl);
   return withInferenceLock(async () => {
     const detections = await detectFaces(image);
+    logDevelopmentDiagnostic('face-detection-complete', {
+      count: detections.length,
+      imageWidth: image.width,
+      imageHeight: image.height
+    });
     if (detections.length === 0) {
       throw new FaceRecognitionError('NO_FACE', 'No face was detected in the camera image.', 422);
     }
@@ -424,6 +545,10 @@ const descriptorFromImage = async imageDataUrl => {
       );
     }
     const face = detections[0];
+    logDevelopmentDiagnostic('face-crop-detected', {
+      width: Math.round(face.x2 - face.x1),
+      height: Math.round(face.y2 - face.y1)
+    });
     if (
       face.x2 - face.x1 < MIN_FACE_DIMENSION ||
       face.y2 - face.y1 < MIN_FACE_DIMENSION
@@ -446,13 +571,27 @@ const descriptorFromImages = async images => {
     );
   }
   const descriptors = [];
-  for (const image of images) {
-    descriptors.push(await descriptorFromImage(image));
+  for (let index = 0; index < images.length; index += 1) {
+    try {
+      descriptors.push(await descriptorFromImage(images[index]));
+    } catch (error) {
+      logDevelopmentDiagnostic('face-sample-failed', {
+        sampleIndex: index,
+        code: error?.code || error?.name || 'UNKNOWN'
+      });
+      throw error;
+    }
   }
   const averaged = descriptors[0].map((_, index) =>
     descriptors.reduce((sum, descriptor) => sum + descriptor[index], 0) / descriptors.length
   );
-  return normalizeDescriptor(averaged);
+  const descriptor = normalizeDescriptor(averaged);
+  logDevelopmentDiagnostic('enrollment-descriptor-ready', {
+    sampleCount: descriptors.length,
+    ...inspectDescriptor(descriptor),
+    normalized: isNormalizedDescriptor(descriptor)
+  });
+  return descriptor;
 };
 
 const disposeFaceRecognition = async () => {
@@ -472,9 +611,13 @@ module.exports = {
   disposeFaceRecognition,
   getBackend: () => (isReady() ? 'onnxruntime-cpu' : null),
   isReady,
+  buildDetectorInput,
   descriptorFromImage,
   descriptorFromImages,
+  inspectDescriptor,
   isValidDescriptor,
+  isNormalizedDescriptor,
+  assertGeneratedDescriptor,
   normalizeDescriptor,
   estimateSimilarityTransform,
   embeddingFromAlignedRgb

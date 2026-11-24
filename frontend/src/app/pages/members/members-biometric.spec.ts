@@ -186,4 +186,28 @@ describe('Members face biometric actions', () => {
     );
     expect(message).not.toContain('internal detail');
   });
+
+  it('explains invalid model descriptor responses without exposing internal details', () => {
+    const component = fixture.componentInstance;
+    const message = (component as any).getBiometricErrorMessage({
+      status: 503,
+      error: { code: 'INVALID_FACE_DESCRIPTOR', message: 'internal detail' }
+    });
+
+    expect(message).toBe('Face template generation failed. Please retry or contact gym staff.');
+    expect(message).not.toContain('internal detail');
+  });
+
+  it('shows the allowlisted backend descriptor validation message', () => {
+    const component = fixture.componentInstance;
+    const message = (component as any).getBiometricErrorMessage({
+      status: 400,
+      error: {
+        code: 'INVALID_FACE_DESCRIPTOR',
+        message: 'A valid 128-value face template is required.'
+      }
+    });
+
+    expect(message).toBe('A valid 128-value face template is required.');
+  });
 });
