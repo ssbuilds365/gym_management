@@ -6,6 +6,7 @@ import { of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { sessionCookieInterceptor } from '../../interceptors/session-cookie.interceptor';
 import { CameraService } from '../../services/camera';
+import { MemberService } from '../../services/member';
 import { AttendanceKiosk } from './attendance-kiosk';
 
 describe('AttendanceKiosk authorization', () => {
@@ -141,7 +142,7 @@ describe('AttendanceKiosk authorization', () => {
     expect(fixture.componentInstance.qrEnabled).toBe(true);
   });
 
-  it('requires staff to enroll kiosk members and maps duplicate responses safely', async () => {
+  it('requires an owner session before staff face registration', async () => {
     sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
     fixture.detectChanges();
 
@@ -160,9 +161,24 @@ describe('AttendanceKiosk authorization', () => {
     fixture.detectChanges();
 
     expect(fixture.componentInstance.faceEnrollmentEnabled).toBe(false);
-    expect(fixture.nativeElement.textContent).toContain(
-      'Face registration must be completed by gym staff after verifying the member.'
+    const registerButton = fixture.nativeElement.querySelector('.face-register-action') as HTMLButtonElement;
+    expect(registerButton.disabled).toBe(false);
+    expect(registerButton.textContent).toContain('Register Member Face');
+    fixture.componentInstance.openStaffRegistration();
+    const profileRequest = httpTestingController.expectOne(request =>
+      request.url === `${environment.apiUrl}/auth/profile`
     );
+    profileRequest.flush({
+      success: false,
+      code: 'SESSION_REQUIRED',
+      message: 'Please log in to continue.'
+    }, { status: 401, statusText: 'Unauthorized' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.staffAuthStep).toBe('login');
+    expect(fixture.nativeElement.textContent).toContain('Kiosk authorization alone cannot register members.');
+    httpTestingController.expectNone(`${environment.apiUrl}/members`);
+
     const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
       error: { code: 'DUPLICATE_FACE_DETECTED', message: 'internal detail' },
       status: 409
@@ -171,6 +187,127 @@ describe('AttendanceKiosk authorization', () => {
       'This face is already registered with another member. Please contact gym staff.'
     );
     expect(message).not.toContain('internal detail');
+  });
+
+  it('searches tenant-scoped members and displays the returned face status after owner verification', async () => {
+    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
+    fixture.detectChanges();
+    httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`).flush({
+      success: true,
+      gym: {
+        id: 'business-id',
+        name: 'Test Gym',
+        faceAttendanceEnabled: true,
+        faceEnrollmentRequiresStaff: true,
+        qrAttendanceEnabled: true
+      }
+    });
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.openStaffRegistration();
+    httpTestingController.expectOne(request =>
+      request.url === `${environment.apiUrl}/auth/profile`
+    ).flush({
+      success: true,
+      owner: { role: 'owner', businessId: 'business-id' },
+      business: { id: 'business-id' },
+      session: { id: 'owner-session' }
+    });
+    await fixture.whenStable();
+    expect(component.staffAuthStep).toBe('authorized');
+
+    component.staffSearchTerm = 'alex';
+    const searchPromise = component.searchStaffMembers();
+    httpTestingController.expectOne(request =>
+      request.url === `${environment.apiUrl}/members` &&
+      request.params.get('search') === 'alex'
+    ).flush({
+      success: true,
+      members: [{
+        _id: 'member-id',
+        legacyMemberId: 'M-104',
+        fullName: 'Alex Member',
+        phone: '5550100',
+        status: 'Active',
+        membership: { status: 'Active', endDate: '2030-01-01' }
+      }]
+    });
+    await Promise.resolve();
+    httpTestingController.expectOne(
+      `${environment.apiUrl}/biometric/credentials/status/member-id`
+    ).flush({
+      success: true,
+      status: 'Registered',
+      registeredAt: '2025-01-01T10:00:00.000Z'
+    });
+    await searchPromise;
+
+    expect(component.staffMembers[0].faceStatus).toBe('Registered');
+    expect(component.staffMembers[0].registeredAt).toBe('2025-01-01T10:00:00.000Z');
+    component.selectStaffMember(component.staffMembers[0]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Alex Member');
+    expect(fixture.nativeElement.textContent).toContain('M-104');
+    expect(fixture.nativeElement.textContent).toContain('Face registration: Registered');
+  });
+
+  it('sends staff samples to the kiosk route with consent and the kiosk bearer token', () => {
+    let response: any;
+    TestBed.inject(MemberService).registerFaceFromKiosk(
+      'member-id',
+      ['sample-one', 'sample-two', 'sample-three'],
+      'kiosk-staff-face-consent-v1',
+      true,
+      'kiosk-token',
+      false
+    ).subscribe(value => { response = value; });
+
+    const request = httpTestingController.expectOne(
+      `${environment.apiUrl}/kiosk/staff/enrollment/face/member-id`
+    );
+    expect(request.request.headers.get('Authorization')).toBe('Bearer kiosk-token');
+    expect(request.request.withCredentials).toBe(true);
+    expect(request.request.body).toEqual({
+      images: ['sample-one', 'sample-two', 'sample-three'],
+      consentGranted: true,
+      consentTextVersion: 'kiosk-staff-face-consent-v1',
+      replaceExisting: false
+    });
+    request.flush({ success: true, status: 'Registered' });
+    expect(response.status).toBe('Registered');
+  });
+
+  it('releases the registration camera when the staff flow closes', async () => {
+    const component = fixture.componentInstance;
+    const camera = TestBed.inject(CameraService);
+    const cameraOpen = vi.spyOn(camera, 'open').mockResolvedValue({
+      getTracks: () => []
+    } as unknown as MediaStream);
+    const cameraStop = vi.spyOn(camera, 'stop');
+    component.authorized = true;
+    component.faceEnrollmentRequiresStaff = true;
+    component.staffRegistrationOpen = true;
+    component.staffAuthStep = 'authorized';
+    component.staffConsent = true;
+    component.staffSelectedMember = {
+      _id: 'member-id',
+      legacyMemberId: 'M-104',
+      fullName: 'Alex Member',
+      phone: '5550100',
+      status: 'Active',
+      faceStatus: 'NotRegistered'
+    };
+    fixture.detectChanges();
+
+    await component.startStaffEnrollmentCamera();
+    expect(cameraOpen).toHaveBeenCalledOnce();
+    expect(component.enrollmentCameraActive).toBe(true);
+
+    component.closeStaffRegistration();
+    expect(cameraStop).toHaveBeenCalled();
+    expect(component.enrollmentCameraActive).toBe(false);
+    expect(component.staffRegistrationOpen).toBe(false);
   });
 
   it('explains invalid model descriptor responses without exposing internal details', () => {

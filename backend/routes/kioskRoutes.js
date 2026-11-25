@@ -13,7 +13,10 @@ const {
   identifyMemberForEnrollment,
   enrollMemberFace
 } = require('../controllers/kioskController');
+const { registerFace } = require('../controllers/biometricController');
 const { protectKiosk } = require('../middleware/kioskAuthMiddleware');
+const { protectOwner } = require('../middleware/authMiddleware');
+const requireKioskGymOwner = require('../middleware/kioskStaffAuthorization');
 
 const kioskAuthRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -48,6 +51,14 @@ router.post('/renew', kioskAuthRateLimit, renewKiosk);
 router.post('/lock', kioskOperationRateLimit, lockKiosk);
 router.post('/enrollment/identify-member', kioskEnrollmentRateLimit, protectKiosk, identifyMemberForEnrollment);
 router.post('/enrollment/face', kioskEnrollmentRateLimit, protectKiosk, enrollMemberFace);
+router.post(
+  '/staff/enrollment/face/:id',
+  kioskEnrollmentRateLimit,
+  protectKiosk,
+  protectOwner,
+  requireKioskGymOwner,
+  registerFace
+);
 router.get('/config', kioskOperationRateLimit, protectKiosk, getKioskConfig);
 router.post('/face/identify', kioskFaceIdentifyRateLimit, protectKiosk, identifyFace);
 router.post('/attendance/check-in', kioskOperationRateLimit, protectKiosk, faceCheckIn);

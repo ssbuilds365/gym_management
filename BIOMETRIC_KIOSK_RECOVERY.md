@@ -76,11 +76,17 @@ Staff registration:
 
 `POST /api/biometric/credentials/member/:memberId/face`
 
-Kiosk enrollment:
+Kiosk staff registration:
+
+`POST /api/kiosk/staff/enrollment/face/:memberId`
+
+This route requires both the kiosk bearer token and the existing owner session cookie. The owner role, tenant, and business must match the kiosk; kiosk authorization alone is insufficient. The kiosk UI verifies the current gym administrator session, then uses the existing Members and face-status APIs to find an active member before opening the camera. It captures the same three camera samples and calls the existing biometric registration controller, preserving consent checks, encrypted persistence, duplicate detection, and explicit replacement handling.
+
+The identifier-only kiosk self-enrollment flow remains disabled. Its legacy endpoints do not grant kiosk users staff registration privileges:
 
 `POST /api/kiosk/enrollment/face`
 
-Both flows require valid samples and consent. The backend:
+Both staff flows require valid samples and consent. The backend:
 
 - Rejects invalid, overlarge, poor-quality, or multiple-face images.
 - Requires a gym/tenant-matching active member.

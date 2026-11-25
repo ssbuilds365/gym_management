@@ -143,6 +143,7 @@ exports.registerFace = async (req, res) => {
       success: true,
       message: 'Face registration saved securely.',
       status: 'Registered',
+      registeredAt: outcome.registeredAt,
       modelVersion: FACE_MODEL_VERSION
     });
   } catch (error) {

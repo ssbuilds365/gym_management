@@ -132,17 +132,22 @@ exports.getAllMembers = async (req, res) => {
       filter.joiningDate = dateRange.range;
     }
 
-    // Search by name or phone
+    // Search by name, phone, legacy member ID, or exact MongoDB member ID.
     if (search.trim()) {
-      const safeSearch = search.trim().replace(
+      const normalizedSearch = search.trim();
+      const safeSearch = normalizedSearch.replace(
         /[.*+?^${}()|[\]\\]/g,
         '\\$&'
       );
 
       filter.$or = [
         { fullName: { $regex: safeSearch, $options: 'i' } },
-        { phone: { $regex: safeSearch, $options: 'i' } }
+        { phone: { $regex: safeSearch, $options: 'i' } },
+        { legacyMemberId: { $regex: safeSearch, $options: 'i' } }
       ];
+      if (/^[a-f\d]{24}$/i.test(normalizedSearch)) {
+        filter.$or.push({ _id: normalizedSearch });
+      }
     }
 
     // Member status filter

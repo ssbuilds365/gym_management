@@ -3,10 +3,12 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { finalize } from 'rxjs';
+import { firstValueFrom, finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { AuthService } from '../../services/auth';
 import { CameraError, CameraService } from '../../services/camera';
 import { FaceRecognitionError, FaceRecognitionService } from '../../services/face-recognition';
+import { MemberService } from '../../services/member';
 
 type KioskResult = {
   type: 'success' | 'expired' | 'duplicate' | 'not-found' | 'camera' | 'error';
@@ -18,6 +20,21 @@ type KioskResult = {
   expiryDate?: string;
   membershipPlan?: string;
   validUntil?: string;
+};
+
+type StaffMember = {
+  _id: string;
+  legacyMemberId?: string;
+  fullName: string;
+  phone: string;
+  status: string;
+  membership?: {
+    status?: string;
+    endDate?: string;
+    planId?: { planName?: string };
+  } | null;
+  faceStatus?: string;
+  registeredAt?: string | null;
 };
 
 @Component({
@@ -41,6 +58,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
 
   gymName = 'SS Fitness Manager';
   gymLogoUrl = '';
+  gymId = '';
   faceEnabled = false;
   qrEnabled = false;
   now = new Date();
@@ -51,15 +69,25 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   cameraStatus = 'Camera idle';
   faceEnrollmentEnabled = false;
   faceEnrollmentRequiresStaff = false;
-  selfRegistrationOpen = false;
-  selfIdentifier = '';
-  selfMember: { id: string; displayId?: string; name: string } | null = null;
-  selfEnrollmentToken = '';
-  selfConsent = false;
-  selfEnrollmentError = '';
-  selfEnrollmentLoading = false;
-  selfEnrollmentSuccess = '';
-  selfEnrollmentStage = '';
+  staffRegistrationOpen = false;
+  staffAuthStep: 'checking' | 'login' | 'authorized' | 'denied' | 'unavailable' = 'checking';
+  staffEmail = '';
+  staffPassword = '';
+  staffAuthError = '';
+  staffAuthBusy = false;
+  staffSearchTerm = '';
+  staffMembers: StaffMember[] = [];
+  staffSearchError = '';
+  staffFaceStatusWarning = '';
+  staffSearchLoading = false;
+  staffSelectedMember: StaffMember | null = null;
+  staffConsent = false;
+  staffReplaceExisting = false;
+  staffEnrollmentError = '';
+  staffEnrollmentLoading = false;
+  staffEnrollmentSuccess = false;
+  staffEnrollmentStage = '';
+  staffRegistrationAt = '';
   enrollmentCameraActive = false;
   scanning = false;
   modelsLoading = false;
@@ -77,10 +105,13 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private continuousScanInProgress = false;
   private recognitionCooldownUntil = 0;
   private resultTimer: ReturnType<typeof setTimeout> | null = null;
+  private staffSearchSequence = 0;
 
   constructor(
     private readonly http: HttpClient,
     private readonly route: ActivatedRoute,
+    private readonly authService: AuthService,
+    private readonly memberService: MemberService,
     private readonly cameraService: CameraService,
     private readonly faceRecognition: FaceRecognitionService,
     private readonly changeDetector: ChangeDetectorRef
@@ -111,6 +142,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     window.removeEventListener('online', this.onNetworkStatusChange);
     window.removeEventListener('offline', this.onNetworkStatusChange);
     void this.releaseWakeLock();
+    this.stopEnrollmentCamera();
     this.stopCamera();
   }
 
@@ -182,6 +214,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private applyGymConfig(gym: any, persist = true): void {
     this.gymName = gym.name || this.gymName;
     this.gymLogoUrl = gym.logoUrl || '';
+    this.gymId = String(gym.id || '');
     this.faceEnabled = Boolean(gym.faceAttendanceEnabled);
     this.faceEnrollmentEnabled = Boolean(gym.faceEnrollmentEnabled);
     this.faceEnrollmentRequiresStaff = Boolean(gym.faceEnrollmentRequiresStaff);
@@ -202,72 +235,201 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.clearKioskSession();
   }
 
-  openSelfRegistration(): void {
-    if (!this.authorized || !this.faceEnrollmentEnabled) return;
-    this.selfRegistrationOpen = true;
-    this.selfIdentifier = '';
-    this.selfMember = null;
-    this.selfEnrollmentToken = '';
-    this.selfConsent = false;
-    this.selfEnrollmentStage = '';
-    this.selfEnrollmentError = '';
-    this.selfEnrollmentSuccess = '';
-    this.selfEnrollmentStage = '';
-    this.changeDetector.markForCheck();
+  openStaffRegistration(): void {
+    if (!this.authorized || !this.faceEnrollmentRequiresStaff || this.scanning) return;
+    this.stopCamera();
+    this.staffRegistrationOpen = true;
+    this.staffAuthStep = 'checking';
+    this.staffEmail = '';
+    this.staffPassword = '';
+    this.staffAuthError = '';
+    this.staffSearchTerm = '';
+    this.staffMembers = [];
+    this.staffSelectedMember = null;
+    this.staffSearchError = '';
+    this.staffFaceStatusWarning = '';
+    this.staffConsent = false;
+    this.staffReplaceExisting = false;
+    this.staffEnrollmentError = '';
+    this.staffEnrollmentSuccess = false;
+    this.staffRegistrationAt = '';
+    this.staffSearchLoading = false;
+    this.staffSearchSequence += 1;
+    void this.verifyStaffSession();
   }
 
-  closeSelfRegistration(): void {
+  closeStaffRegistration(): void {
     this.stopEnrollmentCamera();
-    this.selfRegistrationOpen = false;
-    this.selfMember = null;
-    this.selfEnrollmentToken = '';
-    this.selfConsent = false;
+    this.staffSearchSequence += 1;
+    this.staffRegistrationOpen = false;
+    this.staffPassword = '';
+    this.staffSelectedMember = null;
+    this.staffConsent = false;
+    this.staffReplaceExisting = false;
   }
 
-  identifyMemberForEnrollment(): void {
-    const identifier = this.selfIdentifier.trim();
-    if (!identifier || this.selfEnrollmentLoading) return;
-    this.selfEnrollmentLoading = true;
-    this.selfEnrollmentError = '';
-    this.http.post<any>(
-      `${environment.apiUrl}/kiosk/enrollment/identify-member`,
-      { identifier },
-      { headers: this.kioskHeaders() }
-    ).subscribe({
-      next: response => {
-        this.selfEnrollmentLoading = false;
-        if (response?.success !== true) {
-          this.selfEnrollmentError = response?.message || 'Unable to verify the member.';
-          return;
+  backToStaffSearch(): void {
+    if (this.staffEnrollmentLoading) return;
+    this.stopEnrollmentCamera();
+    this.staffSelectedMember = null;
+    this.staffConsent = false;
+    this.staffReplaceExisting = false;
+    this.staffEnrollmentError = '';
+    this.staffEnrollmentSuccess = false;
+  }
+
+  registerAnotherStaffMember(): void {
+    this.backToStaffSearch();
+    this.staffRegistrationAt = '';
+  }
+
+  private async verifyStaffSession(): Promise<void> {
+    try {
+      const profile = await firstValueFrom(this.authService.getProfile());
+      this.acceptStaffProfile(profile);
+    } catch (error: any) {
+      if (error?.status === 401) {
+        this.staffAuthStep = 'login';
+        this.staffAuthError = '';
+      } else {
+        this.staffAuthStep = 'unavailable';
+        this.staffAuthError = 'Staff authorization could not be verified. Check the connection and retry.';
+      }
+    } finally {
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  private acceptStaffProfile(profile: any): void {
+    const owner = profile?.owner;
+    if (!profile?.success || owner?.role !== 'owner') {
+      this.staffAuthStep = 'denied';
+      this.staffAuthError = 'Only the gym owner or administrator can register a member face.';
+      return;
+    }
+    if (
+      !this.gymId ||
+      !owner.businessId ||
+      String(owner.businessId) !== this.gymId
+    ) {
+      this.staffAuthStep = 'denied';
+      this.staffAuthError = 'This account does not belong to the kiosk gym.';
+      return;
+    }
+    this.staffAuthStep = 'authorized';
+    this.staffAuthError = '';
+  }
+
+  async authenticateStaff(): Promise<void> {
+    const email = this.staffEmail.trim();
+    if (this.staffAuthBusy || !email || !this.staffPassword) return;
+    this.staffAuthBusy = true;
+    this.staffAuthError = '';
+    try {
+      const response = await firstValueFrom(this.authService.login({
+        email,
+        password: this.staffPassword
+      }));
+      if (!response?.success) throw new Error('Staff login was not accepted.');
+      const profile = await firstValueFrom(this.authService.getProfile());
+      this.acceptStaffProfile(profile);
+    } catch (error: any) {
+      this.staffAuthStep = 'login';
+      this.staffAuthError = error?.error?.message ||
+        error?.message ||
+        'Staff login failed. Check the account details and try again.';
+    } finally {
+      this.staffPassword = '';
+      this.staffAuthBusy = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  retryStaffAuthorization(): void {
+    this.staffAuthStep = 'checking';
+    this.staffAuthError = '';
+    void this.verifyStaffSession();
+  }
+
+  showStaffLogin(): void {
+    this.staffAuthStep = 'login';
+    this.staffAuthError = '';
+  }
+
+  async searchStaffMembers(): Promise<void> {
+    const search = this.staffSearchTerm.trim();
+    if (
+      this.staffAuthStep !== 'authorized' ||
+      this.staffSearchLoading ||
+      search.length < 2
+    ) return;
+    const sequence = ++this.staffSearchSequence;
+    this.staffSearchLoading = true;
+    this.staffSearchError = '';
+    this.staffFaceStatusWarning = '';
+    this.staffMembers = [];
+    this.staffSelectedMember = null;
+    try {
+      const response = await firstValueFrom(this.memberService.getMembers(search, '', 1, 10));
+      const members = Array.isArray(response?.members) ? response.members as StaffMember[] : [];
+      const enrichedMembers = await Promise.all(members.map(async member => {
+        try {
+          const faceStatus = await firstValueFrom(this.memberService.getFaceStatus(member._id));
+          return {
+            ...member,
+            faceStatus: String(faceStatus?.status || 'Unavailable'),
+            registeredAt: faceStatus?.registeredAt || null
+          };
+        } catch {
+          return { ...member, faceStatus: 'Unavailable', registeredAt: null };
         }
-        this.selfMember = response.member || null;
-        this.selfEnrollmentToken = response.enrollmentToken || '';
-        this.changeDetector.markForCheck();
-      },
-      error: error => {
-        this.selfEnrollmentLoading = false;
-        this.selfMember = null;
-        this.selfEnrollmentToken = '';
-        if (error?.status === 401) {
-          this.stopCamera();
-          this.clearKioskSession();
-          this.selfRegistrationOpen = false;
-          this.authError = 'Kiosk session expired. Please authorize again.';
-        } else {
-          this.selfEnrollmentError = this.getEnrollmentErrorMessage(error);
-        }
+      }));
+      if (sequence !== this.staffSearchSequence) return;
+      this.staffMembers = enrichedMembers;
+      if (enrichedMembers.some(member => member.faceStatus === 'Unavailable')) {
+        this.staffFaceStatusWarning =
+          'Face registration status could not be checked for every result. Those members cannot be selected until status is available.';
+      }
+    } catch {
+      if (sequence === this.staffSearchSequence) {
+        this.staffSearchError = 'Member search is unavailable. Retry or contact gym staff.';
+      }
+    } finally {
+      if (sequence === this.staffSearchSequence) {
+        this.staffSearchLoading = false;
         this.changeDetector.markForCheck();
       }
-    });
+    }
   }
 
-  async startEnrollmentCamera(): Promise<void> {
-    if (!this.selfMember || !this.selfConsent || this.enrollmentCameraActive) return;
-    this.selfEnrollmentError = '';
+  selectStaffMember(member: StaffMember): void {
+    if (!member.faceStatus || member.faceStatus === 'Unavailable') return;
+    this.stopEnrollmentCamera();
+    this.staffSelectedMember = member;
+    this.staffConsent = false;
+    this.staffReplaceExisting = false;
+    this.staffEnrollmentError = '';
+    this.staffEnrollmentSuccess = false;
+    this.staffRegistrationAt = '';
+  }
+
+  async startStaffEnrollmentCamera(): Promise<void> {
+    const member = this.staffSelectedMember;
+    if (
+      !member ||
+      member.status !== 'Active' ||
+      this.staffAuthStep !== 'authorized' ||
+      !this.staffConsent ||
+      (member.faceStatus !== 'NotRegistered' && !this.staffReplaceExisting) ||
+      this.enrollmentCameraActive ||
+      this.staffEnrollmentLoading
+    ) return;
+    this.staffEnrollmentError = '';
     this.enrollmentCameraActive = true;
     this.changeDetector.detectChanges();
     await Promise.resolve();
     try {
+      if (!this.staffRegistrationOpen || !this.staffSelectedMember) return;
       if (!this.enrollmentVideoRef) throw new Error('Camera preview could not be rendered.');
       this.enrollmentOwnsCamera = !this.cameraService.hasActiveStream;
       if (this.enrollmentOwnsCamera) {
@@ -275,36 +437,53 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       } else {
         await this.cameraService.attach(this.enrollmentVideoRef.nativeElement);
       }
-      this.selfEnrollmentStage = 'Camera Ready';
+      if (!this.staffRegistrationOpen || !this.staffSelectedMember) {
+        this.stopEnrollmentCamera();
+        return;
+      }
+      this.staffEnrollmentStage = 'Camera ready · Position one face in the guide.';
     } catch (error: any) {
       this.stopEnrollmentCamera();
-      this.selfEnrollmentError = error instanceof CameraError
+      this.staffEnrollmentError = error instanceof CameraError
         ? error.message
-        : 'Camera is unavailable.';
+        : 'Camera is unavailable. Check device access and retry.';
     }
   }
 
-  async captureSelfEnrollment(): Promise<void> {
+  async captureStaffEnrollment(): Promise<void> {
+    const member = this.staffSelectedMember;
     if (
-      this.selfEnrollmentLoading ||
-      !this.selfMember ||
-      !this.selfEnrollmentToken ||
-      !this.selfConsent ||
+      this.staffEnrollmentLoading ||
+      !member ||
+      this.staffAuthStep !== 'authorized' ||
+      !this.staffConsent ||
       !this.enrollmentCameraActive
     ) return;
+    const replaceExisting = member.faceStatus !== 'NotRegistered';
+    if (replaceExisting && !this.staffReplaceExisting) {
+      this.staffEnrollmentError = 'Confirm replacement of the existing face registration before continuing.';
+      return;
+    }
+    if (
+      replaceExisting &&
+      !window.confirm(`Replace ${member.fullName}'s existing face registration?`)
+    ) return;
+
     const totalStartedAt = performance.now();
     let modelLoadMs = 0;
     let captureMs = 0;
     let saveMs = 0;
-    this.selfEnrollmentLoading = true;
-    this.selfEnrollmentError = '';
-    this.selfEnrollmentStage = 'Capturing face...';
+    this.staffEnrollmentLoading = true;
+    this.staffEnrollmentError = '';
+    this.staffEnrollmentStage = 'Capturing face samples...';
     this.changeDetector.markForCheck();
     try {
       const modelStartedAt = performance.now();
       await this.loadFaceModels(false);
       modelLoadMs = performance.now() - modelStartedAt;
-      if (!this.modelsLoaded) throw new Error('Face recognition models could not be loaded. Check the connection and retry.');
+      if (!this.modelsLoaded) {
+        throw new Error('Face recognition models could not be loaded. Check the connection and retry.');
+      }
       const video = this.enrollmentVideoRef?.nativeElement;
       if (!video) throw new Error('Camera preview is unavailable.');
       const samples: string[] = [];
@@ -323,44 +502,58 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         }
         previousBox = box;
         samples.push(this.faceRecognition.captureImage(video));
-        this.selfEnrollmentStage = 'Face detected · Capturing samples...';
+        this.staffEnrollmentStage = 'Face detected · Capturing samples...';
         this.changeDetector.markForCheck();
         if (index < 2) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       }
       captureMs = performance.now() - captureStartedAt;
       this.faceRecognition.validateEnrollmentSamples(samples);
-      this.selfEnrollmentStage = 'Processing face samples securely...';
+      this.staffEnrollmentStage = 'Processing face samples securely...';
       this.changeDetector.markForCheck();
       const saveStartedAt = performance.now();
-      const response = await this.http.post<any>(
-        `${environment.apiUrl}/kiosk/enrollment/face`,
-        {
-          images: samples,
-          enrollmentToken: this.selfEnrollmentToken,
-          consentGranted: true
-        },
-        { headers: this.kioskHeaders() }
-      ).toPromise();
+      const response = await firstValueFrom(this.memberService.registerFaceFromKiosk(
+        member._id,
+        samples,
+        'kiosk-staff-face-consent-v1',
+        this.staffConsent,
+        this.token,
+        replaceExisting
+      ));
       saveMs = performance.now() - saveStartedAt;
-      if (response?.success !== true) {
-        throw new Error(response?.message || 'Unable to register face.');
+      if (response?.success !== true || response?.status !== 'Registered') {
+        throw new Error('The server did not confirm face registration.');
       }
-      this.selfEnrollmentSuccess = 'FACE REGISTERED SUCCESSFULLY';
-      this.selfEnrollmentStage = 'Face Registered Successfully';
+      this.staffEnrollmentSuccess = true;
+      this.staffRegistrationAt = response.registeredAt || '';
+      this.staffEnrollmentStage = 'Face registered successfully.';
+      this.staffSelectedMember = {
+        ...member,
+        faceStatus: 'Registered',
+        registeredAt: this.staffRegistrationAt || null
+      };
       this.stopEnrollmentCamera();
     } catch (error: any) {
-      this.selfEnrollmentError = this.getEnrollmentErrorMessage(error);
-      if (error?.status === 401 && error?.error?.code !== 'ENROLLMENT_TOKEN_INVALID') {
-        this.stopEnrollmentCamera();
+      const code = error?.error?.code;
+      if (code === 'STAFF_AUTH_REQUIRED' || code?.startsWith('SESSION_')) {
+        this.staffAuthStep = 'login';
+        this.staffAuthError = 'Your staff session expired. Sign in again to continue.';
+      } else if (code === 'STAFF_GYM_MISMATCH') {
+        this.staffAuthStep = 'denied';
+        this.staffAuthError = 'This account does not belong to the kiosk gym.';
+      } else if (code?.startsWith('KIOSK_') || error?.status === 401) {
         this.stopCamera();
         this.clearKioskSession();
-        this.selfRegistrationOpen = false;
+        this.stopEnrollmentCamera();
+        this.staffRegistrationOpen = false;
         this.authError = 'Kiosk session expired. Please authorize again.';
       }
-      this.selfEnrollmentStage = this.enrollmentCameraActive ? 'Camera Ready · Retry capture when ready.' : '';
+      this.staffEnrollmentError = this.getEnrollmentErrorMessage(error);
+      this.staffEnrollmentStage = this.enrollmentCameraActive
+        ? 'Camera ready · Retry capture when ready.'
+        : '';
     } finally {
-      this.selfEnrollmentLoading = false;
-      this.logPerformance('face-enrollment', {
+      this.staffEnrollmentLoading = false;
+      this.logPerformance('staff-face-enrollment', {
         modelLoadMs,
         captureAndTemplateMs: captureMs,
         saveMs,
@@ -374,6 +567,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     if (this.enrollmentVideoRef?.nativeElement) {
       if (this.enrollmentOwnsCamera) this.cameraService.stop();
       else this.cameraService.detach(this.enrollmentVideoRef.nativeElement);
+    } else if (this.enrollmentOwnsCamera) {
+      this.cameraService.stop();
     }
     this.enrollmentOwnsCamera = false;
     this.enrollmentCameraActive = false;
@@ -405,10 +600,14 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       return 'Face registration is temporarily unavailable. Please contact gym staff.';
     }
     if (code === 'FACE_ALREADY_REGISTERED') return 'This member already has a registered face. Ask gym staff to update it.';
+    if (code === 'FACE_REREGISTRATION_REQUIRED') {
+      return 'This face registration must be updated using the current recognition model.';
+    }
     if (code === 'DUPLICATE_FACE_DETECTED') {
       return 'This face is already registered with another member. Please contact gym staff.';
     }
     if (code === 'MEMBER_NOT_FOUND') return 'Member not found.';
+    if (code === 'STAFF_GYM_MISMATCH') return 'This account does not belong to the kiosk gym.';
     if (code === 'CONSENT_REQUIRED') return 'Consent is required before registering a face.';
     if (code === 'INVALID_FACE_DESCRIPTOR') {
       const safeBackendMessage = error?.error?.message;
@@ -523,7 +722,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   };
 
   async startFaceScan(): Promise<void> {
-    if (!this.authorized || !this.faceEnabled || this.scanning) return;
+    if (!this.authorized || !this.faceEnabled || this.scanning || this.staffRegistrationOpen) return;
     const scanStartedAt = performance.now();
     this.result = null;
     this.cameraError = '';
@@ -588,7 +787,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         !this.scanning &&
         !this.continuousScanInProgress &&
         !this.result &&
-        !this.selfRegistrationOpen &&
+        !this.staffRegistrationOpen &&
         Date.now() >= this.recognitionCooldownUntil
       ) {
         void this.captureContinuousFace();
@@ -629,7 +828,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
       ).toPromise();
       const identifyMs = performance.now() - identifyStartedAt;
       this.logPerformance('continuous-face-recognition', { identifyMs });
-      if (!identify?.success || !identify.matchToken) return;
+      if (this.staffRegistrationOpen || !identify?.success || !identify.matchToken) return;
       await this.checkIn(identify.member.id, identify.matchToken);
       this.recognitionCooldownUntil = Date.now() + 7000;
     } catch (error: any) {
@@ -836,6 +1035,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     localStorage.removeItem(this.refreshStorageKey);
     this.token = '';
     this.authorized = false;
+    this.gymId = '';
     this.faceEnabled = false;
     this.faceEnrollmentEnabled = false;
     this.faceEnrollmentRequiresStaff = false;
@@ -863,7 +1063,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   async qrCheckIn(): Promise<void> {
-    if (!this.qrEnabled) return;
+    if (!this.qrEnabled || this.staffRegistrationOpen) return;
     const qrToken = window.prompt('Scan or enter the member QR token');
     if (!qrToken?.trim()) return;
     try {

@@ -218,6 +218,7 @@ const enrollFaceTemplate = async ({
         );
       }
 
+      const registeredAt = new Date();
       const [savedCredential] = await BiometricCredential.create([{
         tenantId,
         businessId,
@@ -229,7 +230,7 @@ const enrollFaceTemplate = async ({
         consentStatus: 'Granted',
         consentTextVersion,
         consentAt: new Date(),
-        registeredAt: new Date(),
+        registeredAt,
         createdBy: createdBy || null
       }], { session });
 
@@ -240,7 +241,11 @@ const enrollFaceTemplate = async ({
           500
         );
       }
-      return { status: 'registered', credentialId: String(savedCredential._id) };
+      return {
+        status: 'registered',
+        credentialId: String(savedCredential._id),
+        registeredAt
+      };
   });
 };
 

@@ -63,16 +63,14 @@
           <strong>QR Check-in</strong>
           <small>{{ qrEnabled ? 'Use the member QR fallback' : 'QR Attendance Disabled' }}</small>
         </button>
-        <button type="button" class="face-register-action" (click)="openSelfRegistration()" [disabled]="!faceEnrollmentEnabled">
-          <span class="action-icon" aria-hidden="true">＋</span>
-          <strong>{{ faceEnrollmentEnabled ? 'Register Face' : faceEnrollmentRequiresStaff ? 'Staff Registration Required' : 'Face Registration Unavailable' }}</strong>
-          <small>{{ faceEnrollmentEnabled ? 'Use Member ID or mobile number' : 'Register in the Members tab' }}</small>
+        <button type="button" class="face-register-action" (click)="openStaffRegistration()" [disabled]="!faceEnrollmentRequiresStaff">
+          <span class="action-icon" aria-hidden="true">♙</span>
+          <strong>{{ faceEnrollmentRequiresStaff ? 'Register Member Face' : 'Face Registration Unavailable' }}</strong>
+          <small>{{ faceEnrollmentRequiresStaff ? 'Register or update a member’s biometric face profile' : 'Contact gym staff' }}</small>
         </button>
       </div>
-      <p class="face-config-warning" *ngIf="!faceEnrollmentEnabled" role="status">
-        {{ faceEnrollmentRequiresStaff
-          ? 'Face registration must be completed by gym staff after verifying the member.'
-          : 'Face registration is temporarily unavailable. Please contact gym staff.' }}
+      <p class="face-config-warning" *ngIf="!faceEnrollmentRequiresStaff" role="status">
+        Face registration is temporarily unavailable. Please contact gym staff.
       </p>
       <p class="face-config-warning" *ngIf="faceEnabled" role="note">
         Face recognition does not verify liveness or prevent photo/video replay.
@@ -102,56 +100,135 @@
     </section>
   </ng-container>
 
-  <div class="self-registration-backdrop" *ngIf="selfRegistrationOpen">
-    <section class="self-registration-card" role="dialog" aria-modal="true" aria-labelledby="self-registration-title">
-      <button type="button" class="self-registration-close" (click)="closeSelfRegistration()" [disabled]="selfEnrollmentLoading">&times;</button>
-      <span class="eyebrow">MEMBER BIOMETRIC ENROLLMENT</span>
-      <h2 id="self-registration-title">Register Your Face</h2>
+  <div class="self-registration-backdrop" *ngIf="staffRegistrationOpen">
+    <section class="self-registration-card" role="dialog" aria-modal="true" aria-labelledby="staff-registration-title">
+      <button type="button" class="self-registration-close" (click)="closeStaffRegistration()" [disabled]="staffEnrollmentLoading || staffAuthBusy">&times;</button>
+      <span class="eyebrow">STAFF-ONLY BIOMETRIC ENROLLMENT</span>
+      <h2 id="staff-registration-title">Register Member Face</h2>
 
-      <ng-container *ngIf="!selfMember">
-        <p>Enter the Member ID or registered mobile number for this gym.</p>
-        <label>Member ID or Registered Mobile
-          <input [(ngModel)]="selfIdentifier" name="selfIdentifier" autocomplete="off" placeholder="Member ID or 10-digit mobile">
+      <section *ngIf="staffAuthStep === 'checking'" role="status">
+        <p>Verifying the existing gym administrator session…</p>
+      </section>
+
+      <form *ngIf="staffAuthStep === 'login'" (ngSubmit)="authenticateStaff()">
+        <p>Sign in with the gym owner or administrator account. Kiosk authorization alone cannot register members.</p>
+        <label>Administrator email
+          <input [(ngModel)]="staffEmail" name="staffEmail" type="email" autocomplete="username" required>
         </label>
-        <p class="auth-error" *ngIf="selfEnrollmentError" role="alert">{{ selfEnrollmentError }}</p>
-        <button type="button" class="primary-action" (click)="identifyMemberForEnrollment()" [disabled]="selfEnrollmentLoading || !selfIdentifier.trim()">
-          {{ selfEnrollmentLoading ? 'Verifying…' : 'Continue' }}
-        </button>
+        <label>Password
+          <input [(ngModel)]="staffPassword" name="staffPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <p class="auth-error" *ngIf="staffAuthError" role="alert">{{ staffAuthError }}</p>
+        <div class="self-registration-actions">
+          <button type="submit" class="primary-action" [disabled]="staffAuthBusy || !staffEmail.trim() || !staffPassword">
+            {{ staffAuthBusy ? 'Signing in…' : 'Sign in to continue' }}
+          </button>
+          <button type="button" class="secondary-action" (click)="closeStaffRegistration()" [disabled]="staffAuthBusy">Cancel</button>
+        </div>
+      </form>
+
+      <section *ngIf="staffAuthStep === 'denied' || staffAuthStep === 'unavailable'" role="alert">
+        <p class="auth-error">{{ staffAuthError }}</p>
+        <div class="self-registration-actions">
+          <button type="button" class="primary-action"
+            (click)="staffAuthStep === 'denied' ? showStaffLogin() : retryStaffAuthorization()">
+            {{ staffAuthStep === 'denied' ? 'Use another account' : 'Retry verification' }}
+          </button>
+          <button type="button" class="secondary-action" (click)="closeStaffRegistration()">Close</button>
+        </div>
+      </section>
+
+      <ng-container *ngIf="staffAuthStep === 'authorized' && !staffSelectedMember">
+        <form (ngSubmit)="searchStaffMembers()">
+          <p>Search existing members by name, Member ID, or registered mobile number.</p>
+          <label>Member search
+            <input [(ngModel)]="staffSearchTerm" name="staffSearchTerm" autocomplete="off"
+              placeholder="Name, ID, or mobile number" required>
+          </label>
+          <div class="self-registration-actions">
+            <button type="submit" class="primary-action"
+              [disabled]="staffSearchLoading || staffSearchTerm.trim().length < 2">
+              {{ staffSearchLoading ? 'Searching…' : 'Search members' }}
+            </button>
+            <button type="button" class="secondary-action" (click)="closeStaffRegistration()">Return to kiosk</button>
+          </div>
+        </form>
+        <p class="auth-error" *ngIf="staffSearchError" role="alert">{{ staffSearchError }}</p>
+        <p class="face-config-warning" *ngIf="staffFaceStatusWarning" role="status">{{ staffFaceStatusWarning }}</p>
+        <div class="staff-member-results" *ngIf="staffMembers.length">
+          <button type="button" class="staff-member-result" *ngFor="let member of staffMembers"
+            (click)="selectStaffMember(member)" [disabled]="member.faceStatus === 'Unavailable'">
+            <span class="staff-member-info">
+              <strong>{{ member.fullName }}</strong>
+              <small>ID: {{ member.legacyMemberId || member._id }} · {{ member.phone }}</small>
+              <small>Member: {{ member.status }} · Membership: {{ member.membership?.status || 'No record' }}
+                <ng-container *ngIf="member.membership?.endDate"> · until {{ member.membership.endDate | date:'mediumDate' }}</ng-container>
+              </small>
+              <small>Face: {{ member.faceStatus || 'Checking…' }}</small>
+            </span>
+          </button>
+        </div>
+        <p class="muted-copy" *ngIf="!staffSearchLoading && staffSearchTerm.trim().length >= 2 && !staffMembers.length && !staffSearchError">
+          No matching members. Search by another name, ID, or phone number.
+        </p>
       </ng-container>
 
-      <ng-container *ngIf="selfMember">
+      <ng-container *ngIf="staffAuthStep === 'authorized' && staffSelectedMember">
+        <ng-container *ngIf="staffSelectedMember as member">
         <div class="self-member-summary">
-          <strong>{{ selfMember.name }}</strong>
-          <small>Member ID: {{ selfMember.displayId || 'Available at gym desk' }}</small>
+          <strong>{{ member.fullName }}</strong>
+          <small>Member ID: {{ member.legacyMemberId || member._id }} · {{ member.phone }}</small>
+          <small>Member status: {{ member.status }} · Membership: {{ member.membership?.status || 'No record' }}</small>
+          <small>Face registration: {{ member.faceStatus }}</small>
         </div>
         <label class="self-consent">
-          <input type="checkbox" [(ngModel)]="selfConsent" name="selfConsent" [disabled]="selfEnrollmentLoading || !!selfEnrollmentSuccess">
-          I consent to secure face processing for gym attendance. Camera frames are sent to the backend for temporary processing and are not retained; encrypted templates may be deleted through gym staff or the member deletion process.
+          <input type="checkbox" [(ngModel)]="staffConsent" name="staffConsent"
+            [disabled]="staffEnrollmentLoading || staffEnrollmentSuccess">
+          The member consents to face processing for gym attendance. Camera samples are sent to the gym backend for temporary processing; only the encrypted biometric template is retained.
         </label>
+        <label class="self-consent" *ngIf="member.faceStatus !== 'NotRegistered'">
+          <input type="checkbox" [(ngModel)]="staffReplaceExisting" name="staffReplaceExisting"
+            [disabled]="staffEnrollmentLoading || staffEnrollmentSuccess">
+          I am authorized to replace this member’s existing face registration.
+        </label>
+        <p class="face-config-warning" *ngIf="member.status !== 'Active'" role="alert">
+          Only active members can be registered. This member is {{ member.status.toLowerCase() }}.
+        </p>
         <div class="enrollment-camera" *ngIf="enrollmentCameraActive">
           <video #enrollmentVideo autoplay muted playsinline></video>
           <div class="enrollment-face-guide" aria-hidden="true"></div>
-          <p>{{ selfEnrollmentStage || 'Position your face inside the frame.' }}</p>
+          <p>{{ staffEnrollmentStage || 'Position one face inside the guide.' }}</p>
         </div>
-        <p class="auth-error" *ngIf="selfEnrollmentError" role="alert">{{ selfEnrollmentError }}</p>
-        <div class="self-enrollment-success" *ngIf="selfEnrollmentSuccess" role="status">
+        <p class="auth-error" *ngIf="staffEnrollmentError" role="alert">{{ staffEnrollmentError }}</p>
+        <div class="self-enrollment-success" *ngIf="staffEnrollmentSuccess" role="status">
           <div class="success-mark" aria-hidden="true">✓</div>
           <h3>Face Registered Successfully</h3>
-          <p>Your face has been registered for attendance.</p>
-          <button type="button" class="primary-action" (click)="closeSelfRegistration()">Done</button>
+          <p>{{ member.fullName }} · Member ID: {{ member.legacyMemberId || member._id }}</p>
+          <p>Status: Registered</p>
+          <p *ngIf="staffRegistrationAt">Registered: {{ staffRegistrationAt | date:'medium' }}</p>
+          <p *ngIf="!staffRegistrationAt">Registration date was not returned by the server.</p>
         </div>
         <div class="self-registration-actions">
-          <button type="button" class="primary-action" *ngIf="!enrollmentCameraActive && !selfEnrollmentSuccess"
-            (click)="startEnrollmentCamera()" [disabled]="!selfConsent || selfEnrollmentLoading">
-            {{ selfEnrollmentError ? 'Retry Camera' : 'Start Camera' }}
+          <button type="button" class="secondary-action" *ngIf="!staffEnrollmentSuccess"
+            (click)="backToStaffSearch()"
+            [disabled]="staffEnrollmentLoading">Back to search</button>
+          <button type="button" class="primary-action" *ngIf="!enrollmentCameraActive && !staffEnrollmentSuccess"
+            (click)="startStaffEnrollmentCamera()"
+            [disabled]="!staffConsent || (member.faceStatus !== 'NotRegistered' && !staffReplaceExisting) || member.status !== 'Active' || staffEnrollmentLoading">
+            {{ staffEnrollmentError ? 'Retry camera' : 'Start camera' }}
           </button>
-          <button type="button" class="primary-action" *ngIf="enrollmentCameraActive"
-            (click)="captureSelfEnrollment()" [disabled]="!selfConsent || selfEnrollmentLoading">
-            {{ selfEnrollmentLoading ? selfEnrollmentStage : selfEnrollmentError ? 'Retry Capture' : 'Capture & Register' }}
+          <button type="button" class="primary-action" *ngIf="enrollmentCameraActive && !staffEnrollmentSuccess"
+            (click)="captureStaffEnrollment()" [disabled]="!staffConsent || staffEnrollmentLoading">
+            {{ staffEnrollmentLoading ? staffEnrollmentStage : 'Capture & register' }}
           </button>
-          <button type="button" class="secondary-action" *ngIf="!selfEnrollmentSuccess"
-            (click)="closeSelfRegistration()" [disabled]="selfEnrollmentLoading">Cancel</button>
+          <button type="button" class="primary-action" *ngIf="staffEnrollmentSuccess"
+            (click)="registerAnotherStaffMember()">Register another</button>
+          <button type="button" class="secondary-action" *ngIf="staffEnrollmentSuccess"
+            (click)="closeStaffRegistration()">Return to kiosk</button>
+          <button type="button" class="secondary-action" *ngIf="!staffEnrollmentSuccess"
+            (click)="closeStaffRegistration()" [disabled]="staffEnrollmentLoading">Cancel</button>
         </div>
+        </ng-container>
       </ng-container>
     </section>
   </div>

@@ -106,6 +106,23 @@ export class MemberService {
     });
   }
 
+  registerFaceFromKiosk(
+    memberId: string,
+    images: string[],
+    consentTextVersion: string,
+    consentGranted: boolean,
+    kioskToken: string,
+    replaceExisting = false
+  ): Observable<any> {
+    const headers = new HttpHeaders({ Authorization: `Bearer ${kioskToken}` });
+    return this.http.post(`${environment.apiUrl}/kiosk/staff/enrollment/face/${memberId}`, {
+      images,
+      consentGranted,
+      consentTextVersion,
+      replaceExisting
+    }, { headers });
+  }
+
   removeFace(memberId: string): Observable<any> {
     return this.http.delete(`${environment.apiUrl}/biometric/credentials/member/${memberId}/face`);
   }
