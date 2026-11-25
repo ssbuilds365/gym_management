@@ -5,6 +5,7 @@ const OwnerSession = require('../models/OwnerSession');
 const Owner = require('../models/Owner');
 const Business = require('../models/Business');
 const config = require('../config/env');
+const { normalizePhone } = require('../utils/enquiries');
 const {
   changeOwnerPassword,
   validatePasswordChangeInput,
@@ -86,6 +87,7 @@ exports.registerOwner = async (req, res) => {
   let createdOwner;
 
   try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
     const {
       name,
       email,
@@ -94,17 +96,39 @@ exports.registerOwner = async (req, res) => {
       businessName,
       businessType,
       address
-    } = req.body;
+    } = body;
 
     if (
-      !name || !email || !phone || !password ||
-      !businessName || !businessType
+      typeof name !== 'string' || !name.trim() ||
+      typeof email !== 'string' || !email.trim() ||
+      typeof phone !== 'string' || !phone.trim() ||
+      typeof password !== 'string' || !password ||
+      typeof businessName !== 'string' || !businessName.trim() ||
+      typeof businessType !== 'string' ||
+      (address !== undefined && address !== null && typeof address !== 'string')
     ) {
       return res.status(400).json({
         success: false,
         message: 'Please fill all required fields'
       });
     }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid email address'
+      });
+    }
+
+    const parsedPhone = normalizePhone(phone);
+    if (!parsedPhone || !/^\d{10}$/.test(parsedPhone.normalizedPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid 10-digit mobile number'
+      });
+    }
+    const normalizedPhone = parsedPhone.normalizedPhone;
 
     if (password.length < 8) {
       return res.status(400).json({
@@ -127,8 +151,6 @@ exports.registerOwner = async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-
     const existingOwner = await Owner.findOne({
       email: normalizedEmail
     });
@@ -140,23 +162,39 @@ exports.registerOwner = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Create Business
-    createdBusiness = await Business.create({
-      businessName,
-      businessType,
-      ownerName: name,
-      phone,
-      email: normalizedEmail,
-      address
+    const existingOwnerPhone = await Owner.findOne({
+      phone: {
+        $in: [
+          normalizedPhone,
+          `91${normalizedPhone}`,
+          `+91${normalizedPhone}`,
+          `0${normalizedPhone}`
+        ]
+      }
     });
 
-    // Create Owner
-    const owner = await Owner.create({
-      name,
+    if (existingOwnerPhone) {
+      return res.status(409).json({
+        success: false,
+        message: 'An account with this mobile number already exists'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    createdBusiness = await Business.create({
+      businessName: businessName.trim(),
+      businessType,
+      ownerName: name.trim(),
+      phone: normalizedPhone,
       email: normalizedEmail,
-      phone,
+      address: typeof address === 'string' ? address.trim() : ''
+    });
+
+    const owner = await Owner.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      phone: normalizedPhone,
       password: hashedPassword,
       businessId: createdBusiness._id,
       tenantId: createdBusiness._id
@@ -186,19 +224,47 @@ exports.registerOwner = async (req, res) => {
     });
 
   } catch (error) {
-    // Avoid leaving a partially registered account if session creation fails.
+    const rollback = [];
     if (createdOwner) {
-      await Owner.findByIdAndDelete(createdOwner._id);
+      rollback.push(() => Owner.findByIdAndDelete(createdOwner._id));
     }
     if (createdBusiness) {
-      await Business.findByIdAndDelete(createdBusiness._id);
+      rollback.push(() => Business.findByIdAndDelete(createdBusiness._id));
     }
 
-    console.error('Registration Error:', error.message);
+    const rollbackResults = await Promise.allSettled(
+      rollback.map(operation => Promise.resolve().then(operation))
+    );
+    const rollbackFailureCount = rollbackResults.filter(
+      result => result.status === 'rejected'
+    ).length;
+
+    if (error?.code === 11000) {
+      if (rollbackFailureCount > 0) {
+        console.error('Registration rollback incomplete', {
+          errorCode: error.code,
+          rollbackFailureCount
+        });
+      }
+      const duplicateField = Object.keys(error.keyPattern || {})[0];
+      const isPhoneDuplicate = duplicateField === 'phone';
+      return res.status(409).json({
+        success: false,
+        message: isPhoneDuplicate
+          ? 'An account with this mobile number already exists'
+          : 'An account with this email already exists'
+      });
+    }
+
+    console.error('Registration failed', {
+      errorName: error?.name || 'Error',
+      errorCode: error?.code || null,
+      rollbackFailureCount
+    });
 
     return res.status(500).json({
       success: false,
-      message: 'Registration failed'
+      message: 'Registration failed. Please try again.'
     });
   }
 };

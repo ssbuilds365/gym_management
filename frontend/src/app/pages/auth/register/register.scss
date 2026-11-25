@@ -121,6 +121,18 @@
   border-color: #e53935;
 }
 
+.form-group input.ng-invalid.ng-touched,
+.form-group select.ng-invalid.ng-touched,
+.form-group textarea.ng-invalid.ng-touched {
+  border-color: #b91c1c;
+}
+
+.field-error {
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .form-group textarea {
   min-height: 75px;
   resize: vertical;
@@ -146,6 +158,12 @@ form button {
 form button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+form button:focus-visible,
+.login-link a:focus-visible {
+  outline: 3px solid #e53935;
+  outline-offset: 3px;
 }
 
 .login-link {

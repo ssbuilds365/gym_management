@@ -37,7 +37,7 @@ export class Register {
     private changeDetector: ChangeDetectorRef
   ) {
     this.registerForm = this.fb.group({
-      name: ['', Validators.required],
+      name: ['', [Validators.required, Validators.pattern(/\S/)]],
       email: ['', [Validators.required, Validators.email]],
       phone: ['', [
         Validators.required,
@@ -47,15 +47,21 @@ export class Register {
         Validators.required,
         Validators.minLength(8)
       ]],
-      businessName: ['', Validators.required],
+      businessName: ['', [Validators.required, Validators.pattern(/\S/)]],
       businessType: ['Gym', Validators.required],
       address: ['']
     });
   }
 
+  hasFieldError(controlName: string): boolean {
+    const control = this.registerForm.get(controlName);
+    return !!control && control.touched && control.invalid;
+  }
+
   onSubmit(): void {
     if (this.loading) return;
     this.errorMessage = '';
+    this.trimTextFields();
 
     if (this.registerForm.invalid) {
       this.registerForm.markAllAsTouched();
@@ -63,8 +69,17 @@ export class Register {
     }
 
     this.loading = true;
+    const formValue = this.registerForm.getRawValue();
+    const registrationData = {
+      ...formValue,
+      name: formValue.name.trim(),
+      email: formValue.email.trim(),
+      phone: formValue.phone.trim(),
+      businessName: formValue.businessName.trim(),
+      address: formValue.address.trim()
+    };
 
-    this.authService.register(this.registerForm.value)
+    this.authService.register(registrationData)
       .pipe(finalize(() => {
         this.loading = false;
         this.changeDetector.markForCheck();
@@ -82,5 +97,14 @@ export class Register {
           error.error?.message || 'Something went wrong. Please try again.';
       }
     });
+  }
+
+  private trimTextFields(): void {
+    for (const controlName of ['name', 'email', 'phone', 'businessName', 'address']) {
+      const control = this.registerForm.get(controlName);
+      if (typeof control?.value === 'string') {
+        control.setValue(control.value.trim(), { emitEvent: false });
+      }
+    }
   }
 }

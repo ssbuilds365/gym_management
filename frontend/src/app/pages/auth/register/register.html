@@ -24,47 +24,84 @@
         <p>Register your business and start managing it.</p>
       </div>
 
-      <div class="error-message" *ngIf="errorMessage">
+      <div class="error-message" role="alert" aria-live="assertive" *ngIf="errorMessage">
         {{ errorMessage }}
       </div>
 
-      <form [formGroup]="registerForm" (ngSubmit)="onSubmit()">
+      <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" novalidate>
 
         <div class="form-grid">
 
           <div class="form-group">
-            <label>Owner Name *</label>
-            <input type="text" formControlName="name"
-              placeholder="Enter your full name">
+            <label for="owner-name">Owner Name *</label>
+            <input id="owner-name" type="text" formControlName="name"
+              autocomplete="name" placeholder="Enter your full name"
+              aria-describedby="owner-name-error"
+              [attr.aria-invalid]="hasFieldError('name')">
+            <small id="owner-name-error" class="field-error"
+              *ngIf="hasFieldError('name')">
+              Enter your name.
+            </small>
           </div>
 
           <div class="form-group">
-            <label>Email Address *</label>
-            <input type="email" formControlName="email"
-              placeholder="Enter email address">
+            <label for="owner-email">Email Address *</label>
+            <input id="owner-email" type="email" formControlName="email"
+              autocomplete="email" placeholder="Enter email address"
+              aria-describedby="owner-email-error"
+              [attr.aria-invalid]="hasFieldError('email')">
+            <small id="owner-email-error" class="field-error"
+              *ngIf="hasFieldError('email')">
+              {{ registerForm.get('email')?.hasError('required')
+                ? 'Enter your email address.'
+                : 'Enter a valid email address.' }}
+            </small>
           </div>
 
           <div class="form-group">
-            <label>Mobile Number *</label>
-            <input type="tel" maxlength="10" formControlName="phone"
-              placeholder="10 digit mobile number">
+            <label for="owner-phone">Mobile Number *</label>
+            <input id="owner-phone" type="tel" inputmode="numeric"
+              autocomplete="tel-national" maxlength="10" formControlName="phone"
+              placeholder="10 digit mobile number"
+              aria-describedby="owner-phone-error"
+              [attr.aria-invalid]="hasFieldError('phone')">
+            <small id="owner-phone-error" class="field-error"
+              *ngIf="hasFieldError('phone')">
+              {{ registerForm.get('phone')?.hasError('required')
+                ? 'Enter your mobile number.'
+                : 'Enter a 10-digit mobile number.' }}
+            </small>
           </div>
 
           <div class="form-group">
-            <label>Password *</label>
-            <input type="password" formControlName="password"
-              placeholder="Minimum 8 characters">
+            <label for="owner-password">Password *</label>
+            <input id="owner-password" type="password" formControlName="password"
+              autocomplete="new-password" placeholder="Minimum 8 characters"
+              aria-describedby="owner-password-error"
+              [attr.aria-invalid]="hasFieldError('password')">
+            <small id="owner-password-error" class="field-error"
+              *ngIf="hasFieldError('password')">
+              {{ registerForm.get('password')?.hasError('required')
+                ? 'Enter a password.'
+                : 'Use at least 8 characters.' }}
+            </small>
           </div>
 
           <div class="form-group full-width">
-            <label>Business Name *</label>
-            <input type="text" formControlName="businessName"
-              placeholder="Example: SS Fitness Gym">
+            <label for="business-name">Business Name *</label>
+            <input id="business-name" type="text" formControlName="businessName"
+              autocomplete="organization" placeholder="Example: SS Fitness Gym"
+              aria-describedby="business-name-error"
+              [attr.aria-invalid]="hasFieldError('businessName')">
+            <small id="business-name-error" class="field-error"
+              *ngIf="hasFieldError('businessName')">
+              Enter your business name.
+            </small>
           </div>
 
           <div class="form-group full-width">
-            <label>Business Type *</label>
-            <select formControlName="businessType">
+            <label for="business-type">Business Type *</label>
+            <select id="business-type" formControlName="businessType">
               <option *ngFor="let type of businessTypes" [value]="type">
                 {{ type }}
               </option>
@@ -72,8 +109,8 @@
           </div>
 
           <div class="form-group full-width">
-            <label>Business Address</label>
-            <textarea formControlName="address"
+            <label for="business-address">Business Address</label>
+            <textarea id="business-address" formControlName="address"
               placeholder="Enter your business address"></textarea>
           </div>
 
