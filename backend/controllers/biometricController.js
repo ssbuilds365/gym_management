@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Member = require('../models/Member');
 const BiometricCredential = require('../models/BiometricCredential');
 const KioskCredential = require('../models/KioskCredential');
+const KioskSession = require('../models/KioskSession');
 const Business = require('../models/Business');
 const { hashKioskSecret } = require('../utils/kioskCredentialSecret');
 const config = require('../config/env');
@@ -365,6 +366,12 @@ exports.rotateKioskCredential = async (req, res) => {
     existing.active = false;
     existing.revokedAt = new Date();
     await existing.save();
+    await KioskSession.updateMany({
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      credentialId: existing.credentialId,
+      revokedAt: null
+    }, { $set: { revokedAt: new Date() } });
     return res.status(201).json({
       success: true,
       credential: { credentialId, label, secret },
@@ -387,5 +394,11 @@ exports.revokeKioskCredential = async (req, res) => {
     businessId: req.owner.businessId
   }, { $set: { active: false, revokedAt: new Date() } }, { new: true });
   if (!credential) return res.status(404).json({ success: false, message: 'Kiosk credential not found.' });
+  await KioskSession.updateMany({
+    tenantId: req.tenantId,
+    businessId: req.owner.businessId,
+    credentialId: credential.credentialId,
+    revokedAt: null
+  }, { $set: { revokedAt: new Date() } });
   return res.json({ success: true, message: 'Kiosk credential revoked.' });
 };

@@ -161,6 +161,18 @@ Optional existing settings include `BIOMETRIC_KEY_VERSION`, `ALLOWED_ORIGINS`, a
 7. Start Angular on port 4200.
 8. Access the kiosk and member workflows only over localhost or HTTPS.
 
+## Public kiosk access and persistent device sessions
+
+`/attendance-kiosk` is intentionally public and is not protected by the dashboard owner-session guard. The kiosk must first be authorized with its gym-specific credential; this does not authorize staff registration. Registering a member face still requires a separate existing owner/admin session and a backend tenant/business match.
+
+The kiosk's long-lived refresh token is an `HttpOnly`, `SameSite=Lax` cookie scoped to `/api/kiosk`, with a 30-day server-side expiry. The Angular app keeps the short-lived access token in memory only. On page load it sends a same-origin kiosk renewal request and then validates the returned access token against the gym configuration. Refresh rotation atomically replaces the stored token hash in the same session document; replaying the old token fails. Locking revokes only that device session, while rotating or revoking a kiosk credential revokes its associated sessions.
+
+The browser no longer uses the legacy `ssfm_kiosk_refresh`, `ssfm_kiosk_token`, or `ssfm_kiosk_gym` storage values. A device that only has a legacy local refresh token must be authorized once more after this version is deployed; the credential itself does not need rotation. No database migration or production data change is required.
+
+For cookie renewal, the backend requires the kiosk request marker and an allowed browser origin. Local development allows `http://localhost:4200`; production includes the configured `FRONTEND_URL` and the existing Vercel origin. Add any custom frontend origin to `ALLOWED_ORIGINS` if it is not already covered. The existing Vercel `/api/*` rewrite proxies requests and `Set-Cookie` responses to Render under the frontend origin, so production browser calls use the relative `/api` base URL. Dashboard owner authentication remains separate and unchanged.
+
+The screen wake lock is best-effort only. Android kiosk devices may also need their display timeout, battery optimization, or managed-kiosk settings configured by the device administrator.
+
 ## Render deployment
 
 1. Set Render runtime to Node 22.x.
@@ -184,7 +196,7 @@ The local Windows install completed on Node 22.23.5 and `require('onnxruntime-no
 - Deploy the frontend without secret environment values.
 - Serve ONNX WASM and YuNet assets with the Angular build.
 - Android Chrome camera access requires HTTPS and browser camera permission.
-- Kiosk authorization must target the Render backend URL, not the Vercel origin.
+- Production kiosk requests use the frontend's relative `/api` URL, which Vercel rewrites to the Render backend. Local Angular development uses the local backend API URL.
 - Camera streams open only when a capture or scan action starts.
 
 ## API endpoints

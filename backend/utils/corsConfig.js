@@ -9,7 +9,7 @@ const buildCorsOptions = (allowedOrigins) => {
       return callback(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Idempotency-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Idempotency-Key', 'X-Kiosk-Request'],
     credentials: true
   };
 };

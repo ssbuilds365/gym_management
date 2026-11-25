@@ -15,6 +15,7 @@ describe('AttendanceKiosk authorization', () => {
 
   beforeEach(async () => {
     sessionStorage.clear();
+    localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [AttendanceKiosk],
       providers: [
@@ -34,10 +35,45 @@ describe('AttendanceKiosk authorization', () => {
   afterEach(() => {
     httpTestingController.verify();
     sessionStorage.clear();
+    localStorage.clear();
   });
 
-  it('switches to the kiosk after success, stores the token, and does not request camera access', async () => {
+  const rejectInitialRenewal = async (): Promise<void> => {
     fixture.detectChanges();
+    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`);
+    expect(request.request.body).toEqual({});
+    expect(request.request.headers.get('X-Kiosk-Request')).toBe('1');
+    request.flush({
+      success: false,
+      code: 'KIOSK_REFRESH_REQUIRED',
+      message: 'Persistent kiosk authorization is required.'
+    }, { status: 401, statusText: 'Unauthorized' });
+    await fixture.whenStable();
+  };
+
+  const restoreAuthorizedKiosk = async (gym: object): Promise<void> => {
+    fixture.detectChanges();
+    const renewal = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`);
+    expect(renewal.request.body).toEqual({});
+    expect(renewal.request.headers.get('X-Kiosk-Request')).toBe('1');
+    renewal.flush({ success: true, token: 'restored-kiosk-token', expiresInSeconds: 900 });
+    await Promise.resolve();
+    const config = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
+    expect(config.request.headers.get('Authorization')).toBe('Bearer restored-kiosk-token');
+    config.flush({ success: true, gym });
+    await fixture.whenStable();
+  };
+
+  it('authorizes through the cookie flow and does not persist access or refresh tokens', async () => {
+    fixture.detectChanges();
+    const renewal = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`);
+    renewal.flush({
+      success: false,
+      code: 'KIOSK_REFRESH_REQUIRED',
+      message: 'Persistent kiosk authorization is required.'
+    }, { status: 401, statusText: 'Unauthorized' });
+    await fixture.whenStable();
+
     const component = fixture.componentInstance;
     const cameraOpen = vi.spyOn(TestBed.inject(CameraService), 'open')
       .mockRejectedValue(new Error('Camera access must remain user initiated.'));
@@ -72,7 +108,8 @@ describe('AttendanceKiosk authorization', () => {
     expect(component.faceEnrollmentEnabled).toBe(false);
     expect(component.faceEnrollmentRequiresStaff).toBe(true);
     expect(component.kioskSecret).toBe('');
-    expect(sessionStorage.getItem('ssfm_kiosk_token')).toBe('short-lived-token');
+    expect(sessionStorage.getItem('ssfm_kiosk_token')).toBeNull();
+    expect(localStorage.getItem('ssfm_kiosk_refresh')).toBeNull();
     expect(fixture.nativeElement.querySelector('.authorization')).toBeNull();
     expect(fixture.nativeElement.querySelector('.kiosk-home')).not.toBeNull();
     expect(component.cameraActive).toBe(false);
@@ -80,7 +117,7 @@ describe('AttendanceKiosk authorization', () => {
   });
 
   it('prevents duplicate authorization requests and resets loading on failure', async () => {
-    fixture.detectChanges();
+    await rejectInitialRenewal();
     const component = fixture.componentInstance;
     component.credentialId = 'kiosk_test';
     component.kioskSecret = 'invalid-secret';
@@ -101,37 +138,49 @@ describe('AttendanceKiosk authorization', () => {
     expect(fixture.nativeElement.textContent).toContain('Invalid kiosk credentials.');
   });
 
-  it('sends a stored kiosk token when validating an existing session', async () => {
-    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
-    fixture.detectChanges();
+  it('restores a kiosk session from its HttpOnly cookie on a cold start', async () => {
+    await restoreAuthorizedKiosk({
+      name: 'Test Gym',
+      faceAttendanceEnabled: true,
+      qrAttendanceEnabled: true
+    });
 
-    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
-    expect(request.request.headers.get('Authorization')).toBe('Bearer stored-token');
-    request.flush({
+    expect(fixture.componentInstance.authorized).toBe(true);
+    expect(fixture.componentInstance.token).toBe('restored-kiosk-token');
+    expect(sessionStorage.getItem('ssfm_kiosk_token')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.kiosk-home')).not.toBeNull();
+  });
+
+  it('allows retrying cookie restoration after a temporary network failure', async () => {
+    fixture.detectChanges();
+    httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`).flush(
+      { message: 'Network unavailable' },
+      { status: 0, statusText: 'Unknown Error' }
+    );
+    await fixture.whenStable();
+    expect(fixture.componentInstance.sessionRetryAvailable).toBe(true);
+
+    fixture.componentInstance.retryKioskSession();
+    const renewal = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`);
+    renewal.flush({ success: true, token: 'retried-kiosk-token' });
+    await Promise.resolve();
+    httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`).flush({
       success: true,
       gym: { name: 'Test Gym', faceAttendanceEnabled: true, qrAttendanceEnabled: true }
     });
     await fixture.whenStable();
 
     expect(fixture.componentInstance.authorized).toBe(true);
-    expect(fixture.nativeElement.querySelector('.kiosk-home')).not.toBeNull();
+    expect(fixture.componentInstance.sessionRetryAvailable).toBe(false);
   });
 
   it('disables face enrollment when the backend reports unavailable while retaining QR attendance', async () => {
-    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
-    fixture.detectChanges();
-
-    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
-    request.flush({
-      success: true,
-      gym: {
-        name: 'Test Gym',
-        faceAttendanceEnabled: false,
-        faceEnrollmentEnabled: false,
-        qrAttendanceEnabled: true
-      }
+    await restoreAuthorizedKiosk({
+      name: 'Test Gym',
+      faceAttendanceEnabled: false,
+      faceEnrollmentEnabled: false,
+      qrAttendanceEnabled: true
     });
-    await fixture.whenStable();
     fixture.detectChanges();
 
     const registerButton = fixture.nativeElement.querySelector('.face-register-action') as HTMLButtonElement;
@@ -143,21 +192,13 @@ describe('AttendanceKiosk authorization', () => {
   });
 
   it('requires an owner session before staff face registration', async () => {
-    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
-    fixture.detectChanges();
-
-    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
-    request.flush({
-      success: true,
-      gym: {
-        name: 'Test Gym',
-        faceAttendanceEnabled: true,
-        faceEnrollmentEnabled: false,
-        faceEnrollmentRequiresStaff: true,
-        qrAttendanceEnabled: true
-      }
+    await restoreAuthorizedKiosk({
+      name: 'Test Gym',
+      faceAttendanceEnabled: true,
+      faceEnrollmentEnabled: false,
+      faceEnrollmentRequiresStaff: true,
+      qrAttendanceEnabled: true
     });
-    await fixture.whenStable();
     fixture.detectChanges();
 
     expect(fixture.componentInstance.faceEnrollmentEnabled).toBe(false);
@@ -190,19 +231,13 @@ describe('AttendanceKiosk authorization', () => {
   });
 
   it('searches tenant-scoped members and displays the returned face status after owner verification', async () => {
-    sessionStorage.setItem('ssfm_kiosk_token', 'stored-token');
-    fixture.detectChanges();
-    httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`).flush({
-      success: true,
-      gym: {
-        id: 'business-id',
-        name: 'Test Gym',
-        faceAttendanceEnabled: true,
-        faceEnrollmentRequiresStaff: true,
-        qrAttendanceEnabled: true
-      }
+    await restoreAuthorizedKiosk({
+      id: 'business-id',
+      name: 'Test Gym',
+      faceAttendanceEnabled: true,
+      faceEnrollmentRequiresStaff: true,
+      qrAttendanceEnabled: true
     });
-    await fixture.whenStable();
 
     const component = fixture.componentInstance;
     component.openStaffRegistration();
@@ -279,6 +314,7 @@ describe('AttendanceKiosk authorization', () => {
   });
 
   it('releases the registration camera when the staff flow closes', async () => {
+    await rejectInitialRenewal();
     const component = fixture.componentInstance;
     const camera = TestBed.inject(CameraService);
     const cameraOpen = vi.spyOn(camera, 'open').mockResolvedValue({
@@ -310,6 +346,39 @@ describe('AttendanceKiosk authorization', () => {
     expect(component.staffRegistrationOpen).toBe(false);
   });
 
+  it('locks the kiosk through the server and confirms the locked state only after revocation', () => {
+    const component = fixture.componentInstance;
+    component.authorized = true;
+    component.token = 'in-memory-access-token';
+    component.logoutKiosk();
+
+    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/lock`);
+    expect(request.request.body).toEqual({});
+    expect(request.request.headers.get('Authorization')).toBe('Bearer in-memory-access-token');
+    expect(request.request.headers.get('X-Kiosk-Request')).toBe('1');
+    expect(component.authorized).toBe(true);
+    request.flush({ success: true, message: 'Kiosk locked.' });
+
+    expect(component.authorized).toBe(false);
+    expect(component.kioskLocked).toBe(true);
+    expect(component.token).toBe('');
+  });
+
+  it('resumes kiosk scanning after the staff registration flow closes when scanning was active', () => {
+    const component = fixture.componentInstance;
+    component.authorized = true;
+    component.faceEnabled = true;
+    component.staffRegistrationOpen = true;
+    (component as any).resumeKioskScanAfterRegistration = true;
+    (component as any).scanningRequested = true;
+    const resumeScan = vi.spyOn(component as any, 'startKioskCamera').mockResolvedValue(undefined);
+
+    component.closeStaffRegistration();
+
+    expect(resumeScan).toHaveBeenCalledOnce();
+    expect(component.staffRegistrationOpen).toBe(false);
+  });
+
   it('explains invalid model descriptor responses without exposing internal details', () => {
     const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
       error: { code: 'INVALID_FACE_DESCRIPTOR', message: 'internal detail' },
@@ -332,22 +401,24 @@ describe('AttendanceKiosk authorization', () => {
     expect(message).toBe('A valid 128-value face template is required.');
   });
 
-  it('clears an expired stored token and asks for reauthorization', async () => {
+  it('clears legacy local tokens and asks for cookie-backed reauthorization', async () => {
     sessionStorage.setItem('ssfm_kiosk_token', 'expired-token');
+    localStorage.setItem('ssfm_kiosk_refresh', 'legacy-refresh-token');
     fixture.detectChanges();
 
-    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/config`);
-    expect(request.request.headers.get('Authorization')).toBe('Bearer expired-token');
+    const request = httpTestingController.expectOne(`${environment.apiUrl}/kiosk/renew`);
+    expect(request.request.body).toEqual({});
     request.flush({
       success: false,
-      code: 'KIOSK_TOKEN_INVALID',
-      message: 'Kiosk authorization is invalid or expired.'
+      code: 'KIOSK_REFRESH_REQUIRED',
+      message: 'Persistent kiosk authorization is required.'
     }, { status: 401, statusText: 'Unauthorized' });
     await fixture.whenStable();
 
     expect(fixture.componentInstance.authorized).toBe(false);
-    expect(fixture.componentInstance.authError).toContain('session expired');
+    expect(fixture.componentInstance.authError).toBe('');
     expect(sessionStorage.getItem('ssfm_kiosk_token')).toBeNull();
+    expect(localStorage.getItem('ssfm_kiosk_refresh')).toBeNull();
     expect(fixture.nativeElement.querySelector('.authorization')).not.toBeNull();
   });
 

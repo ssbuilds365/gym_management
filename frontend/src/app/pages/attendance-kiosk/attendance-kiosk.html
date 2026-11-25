@@ -30,8 +30,8 @@
     <section class="authorization" *ngIf="!authorized">
       <div class="auth-card">
         <div class="brand-mark large">SS</div>
-        <h1>Authorize Attendance Kiosk</h1>
-        <p>Enter the gym-specific kiosk credential issued by an authorized staff account.</p>
+        <h1>{{ kioskLocked ? 'Kiosk Locked' : 'Authorize Attendance Kiosk' }}</h1>
+        <p>Enter this gym’s device credential. Members do not need to sign in.</p>
         <label>Credential ID
           <input [(ngModel)]="credentialId" name="credentialId" autocomplete="off" placeholder="kiosk_...">
         </label>
@@ -39,6 +39,10 @@
           <input [(ngModel)]="kioskSecret" name="kioskSecret" type="password" autocomplete="off">
         </label>
         <p class="auth-error" *ngIf="authError" role="alert">{{ authError }}</p>
+        <button type="button" class="secondary-action" *ngIf="sessionRetryAvailable"
+          (click)="retryKioskSession()" [disabled]="renewingKiosk">
+          {{ renewingKiosk ? 'Checking session…' : 'Retry Existing Kiosk Session' }}
+        </button>
         <button type="button" class="primary-action" (click)="authenticate()" [disabled]="authenticating || !credentialId || !kioskSecret">
           {{ authenticating ? 'Authorizing…' : 'Authorize Kiosk' }}
         </button>
@@ -75,6 +79,9 @@
       <p class="face-config-warning" *ngIf="faceEnabled" role="note">
         Face recognition does not verify liveness or prevent photo/video replay.
       </p>
+      <p class="camera-status-bar" role="note">
+        Screen wake lock is used when supported. Android display timeout and battery settings may also need adjustment.
+      </p>
 
       <section class="camera-panel" *ngIf="cameraActive">
         <video #video autoplay muted playsinline></video>
@@ -82,7 +89,7 @@
         <div class="camera-panel-top"><i class="status-dot"></i> Camera Active · {{ scanning ? 'Scanning' : 'Ready to Scan' }}</div>
         <div class="camera-panel-bottom">
           <p>{{ faceStatus }}</p>
-          <button type="button" (click)="stopCamera(); scanning=false">Cancel Scan</button>
+          <button type="button" (click)="cancelFaceScanning()">Cancel Scan</button>
         </div>
       </section>
 
@@ -96,7 +103,10 @@
         <p>{{ cameraError }}</p>
         <button type="button" class="retry-camera" (click)="retryCamera()">↻ Retry Camera</button>
       </section>
-      <button type="button" class="logout-kiosk" (click)="logoutKiosk()">Lock Kiosk</button>
+      <p class="auth-error" *ngIf="authError" role="alert">{{ authError }}</p>
+      <button type="button" class="logout-kiosk" (click)="logoutKiosk()" [disabled]="lockingKiosk">
+        {{ lockingKiosk ? 'Locking…' : 'Lock Kiosk' }}
+      </button>
     </section>
   </ng-container>
 

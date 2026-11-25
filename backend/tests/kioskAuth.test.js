@@ -9,6 +9,7 @@ process.env.KIOSK_TOKEN_SECRET = crypto.randomBytes(32).toString('base64url');
 process.env.BIOMETRIC_TEMPLATE_KEY = crypto.randomBytes(32).toString('base64');
 
 const KioskCredential = require('../models/KioskCredential');
+const KioskSession = require('../models/KioskSession');
 const Business = require('../models/Business');
 const Attendance = require('../models/Attendance');
 const BiometricCredential = require('../models/BiometricCredential');
@@ -17,6 +18,8 @@ const MemberMembership = require('../models/MemberMembership');
 const config = require('../config/env');
 const {
   authenticateKiosk,
+  renewKiosk,
+  lockKiosk,
   faceCheckIn,
   getKioskCapabilities
 } = require('../controllers/kioskController');
@@ -87,12 +90,24 @@ test('kiosk capabilities require biometric configuration and model readiness', t
 const response = () => ({
   statusCode: 200,
   body: null,
+  cookieValue: null,
+  cookieOptions: null,
+  clearedCookie: null,
   status(code) {
     this.statusCode = code;
     return this;
   },
   json(body) {
     this.body = body;
+    return this;
+  },
+  cookie(name, value, options) {
+    this.cookieValue = { name, value };
+    this.cookieOptions = options;
+    return this;
+  },
+  clearCookie(name, options) {
+    this.clearedCookie = { name, options };
     return this;
   }
 });
@@ -115,12 +130,14 @@ test('credential creation stores only a hash scoped to the owner gym and authori
   const originalCreate = KioskCredential.create;
   const originalFindOne = KioskCredential.findOne;
   const originalUpdateOne = KioskCredential.updateOne;
+  const originalSessionCreate = KioskSession.create;
   const originalBusinessFindById = Business.findById;
   const originalFaceRecognitionIsReady = faceRecognition.isReady;
   t.after(() => {
     KioskCredential.create = originalCreate;
     KioskCredential.findOne = originalFindOne;
     KioskCredential.updateOne = originalUpdateOne;
+    KioskSession.create = originalSessionCreate;
     Business.findById = originalBusinessFindById;
     faceRecognition.isReady = originalFaceRecognitionIsReady;
   });
@@ -157,6 +174,10 @@ test('credential creation stores only a hash scoped to the owner gym and authori
     select: async () => storedCredential
   });
   KioskCredential.updateOne = async () => ({ modifiedCount: 1 });
+  KioskSession.create = async document => ({
+    ...document,
+    _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439099')
+  });
   Business.findById = () => ({
     select: async () => ({
       businessName: 'Test Gym',
@@ -175,6 +196,11 @@ test('credential creation stores only a hash scoped to the owner gym and authori
   }, authorizationResponse);
 
   assert.equal(authorizationResponse.statusCode, 200);
+  assert.equal(authorizationResponse.cookieValue.name, 'ssfm_kiosk_refresh');
+  assert.equal(authorizationResponse.cookieOptions.httpOnly, true);
+  assert.equal(authorizationResponse.cookieOptions.path, '/api/kiosk');
+  assert.equal(authorizationResponse.body.refreshToken, undefined);
+  assert.equal(authorizationResponse.cookieValue.value.length, 64);
   const claims = jwt.verify(authorizationResponse.body.token, config.kioskTokenSecret, {
     issuer: 'ss-fitness-manager'
   });
@@ -182,6 +208,7 @@ test('credential creation stores only a hash scoped to the owner gym and authori
   assert.equal(claims.businessId, businessId);
   assert.equal(claims.credentialId, storedCredential.credentialId);
   assert.equal(claims.purpose, 'attendance-kiosk');
+  assert.equal(claims.sessionId, '507f1f77bcf86cd799439099');
   assert.equal(authorizationResponse.body.expiresInSeconds, 900);
   assert.equal(authorizationResponse.body.gym.faceAttendanceEnabled, true);
   assert.equal(authorizationResponse.body.gym.faceEnrollmentEnabled, false);
@@ -219,6 +246,135 @@ test('invalid and revoked kiosk credentials are rejected', async t => {
   }, revokedResponse);
   assert.equal(revokedResponse.statusCode, 401);
   assert.equal(revokedResponse.body.code, 'KIOSK_AUTH_INVALID');
+});
+
+test('kiosk renewal rotates the HttpOnly cookie without returning a refresh token', async t => {
+  const originals = {
+    sessionFindOne: KioskSession.findOne,
+    sessionFindOneAndUpdate: KioskSession.findOneAndUpdate,
+    sessionCreate: KioskSession.create,
+    credentialFindOne: KioskCredential.findOne,
+    credentialUpdateOne: KioskCredential.updateOne
+  };
+  t.after(() => {
+    KioskSession.findOne = originals.sessionFindOne;
+    KioskSession.findOneAndUpdate = originals.sessionFindOneAndUpdate;
+    KioskSession.create = originals.sessionCreate;
+    KioskCredential.findOne = originals.credentialFindOne;
+    KioskCredential.updateOne = originals.credentialUpdateOne;
+  });
+
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
+  const credential = {
+    _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439011'),
+    credentialId: 'kiosk_test',
+    tenantId: '507f1f77bcf86cd799439012',
+    businessId: '507f1f77bcf86cd799439013',
+    active: true,
+    revokedAt: null
+  };
+  KioskSession.findOne = async filter => {
+    assert.equal(filter.refreshTokenHash, crypto.createHash('sha256').update(refreshToken).digest('hex'));
+    return {
+      _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439099'),
+      credentialId: credential.credentialId,
+      tenantId: credential.tenantId,
+      businessId: credential.businessId
+    };
+  };
+  let replacedFilter;
+  let replacement;
+  KioskSession.findOneAndUpdate = async (filter, update, options) => {
+    replacedFilter = filter;
+    replacement = update.$set;
+    assert.ok(replacement.lastUsedAt instanceof Date);
+    assert.equal(options.new, true);
+    return {
+      _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439099'),
+      credentialId: credential.credentialId,
+      tenantId: credential.tenantId,
+      businessId: credential.businessId
+    };
+  };
+  KioskCredential.findOne = async () => credential;
+  KioskCredential.updateOne = async () => ({ modifiedCount: 1 });
+
+  const res = response();
+  await renewKiosk({
+    headers: {
+      origin: 'http://localhost:4200',
+      'x-kiosk-request': '1',
+      cookie: `ssfm_kiosk_refresh=${refreshToken}`
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(replacedFilter._id.toString(), '507f1f77bcf86cd799439099');
+  assert.equal(replacedFilter.refreshTokenHash, crypto.createHash('sha256').update(refreshToken).digest('hex'));
+  assert.notEqual(replacement.refreshTokenHash, replacedFilter.refreshTokenHash);
+  assert.equal(
+    replacement.refreshTokenHash,
+    crypto.createHash('sha256').update(res.cookieValue.value).digest('hex')
+  );
+  assert.equal(res.cookieValue.name, 'ssfm_kiosk_refresh');
+  assert.equal(res.cookieOptions.httpOnly, true);
+  assert.equal(res.body.refreshToken, undefined);
+  assert.equal(jwt.decode(res.body.token).sessionId, '507f1f77bcf86cd799439099');
+  assert.ok(res.body.token);
+});
+
+test('kiosk renewal rejects untrusted origins before reading or rotating a session', async t => {
+  const originalFindOne = KioskSession.findOne;
+  t.after(() => { KioskSession.findOne = originalFindOne; });
+  let sessionLookupCount = 0;
+  KioskSession.findOne = async () => {
+    sessionLookupCount += 1;
+    return null;
+  };
+  const res = response();
+
+  await renewKiosk({
+    headers: {
+      origin: 'https://untrusted.example',
+      'x-kiosk-request': '1',
+      cookie: 'ssfm_kiosk_refresh=not-a-valid-session'
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'KIOSK_CSRF_REJECTED');
+  assert.equal(sessionLookupCount, 0);
+});
+
+test('kiosk lock revokes only the session bound to the access token', async t => {
+  const originalUpdateOne = KioskSession.updateOne;
+  t.after(() => { KioskSession.updateOne = originalUpdateOne; });
+  let revokedFilter;
+  KioskSession.updateOne = async filter => {
+    revokedFilter = filter;
+    return { modifiedCount: 1 };
+  };
+  const sessionId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439099');
+  const res = response();
+
+  await lockKiosk({
+    kiosk: {
+      sessionId,
+      tenantId: '507f1f77bcf86cd799439012',
+      businessId: '507f1f77bcf86cd799439013',
+      credentialId: 'kiosk_test'
+    }
+  }, res);
+
+  assert.deepEqual(revokedFilter, {
+    _id: sessionId,
+    tenantId: '507f1f77bcf86cd799439012',
+    businessId: '507f1f77bcf86cd799439013',
+    credentialId: 'kiosk_test',
+    revokedAt: null
+  });
+  assert.equal(res.clearedCookie.name, 'ssfm_kiosk_refresh');
+  assert.deepEqual(res.body, { success: true, message: 'Kiosk locked.' });
 });
 
 test('face check-in rejects a client-supplied member without a recent signed match', async () => {
@@ -481,7 +637,11 @@ test('expired membership cannot create biometric attendance', async t => {
 
 test('kiosk token middleware checks current credential status and preserves tenant claims', async t => {
   const originalFindOne = KioskCredential.findOne;
-  t.after(() => { KioskCredential.findOne = originalFindOne; });
+  const originalSessionFindOne = KioskSession.findOne;
+  t.after(() => {
+    KioskCredential.findOne = originalFindOne;
+    KioskSession.findOne = originalSessionFindOne;
+  });
   const credential = {
     credentialId: 'kiosk_test',
     tenantId: 'gym-tenant',
@@ -494,12 +654,16 @@ test('kiosk token middleware checks current credential status and preserves tena
     purpose: 'attendance-kiosk',
     tenantId: credential.tenantId,
     businessId: credential.businessId,
-    credentialId: credential.credentialId
+    credentialId: credential.credentialId,
+    sessionId: '507f1f77bcf86cd799439099'
   }, config.kioskTokenSecret, {
     expiresIn: '15m',
     issuer: 'ss-fitness-manager'
   });
 
+  KioskSession.findOne = () => ({
+    select: async () => ({ _id: '507f1f77bcf86cd799439099' })
+  });
   KioskCredential.findOne = () => ({
     select: async () => credential
   });
@@ -510,6 +674,18 @@ test('kiosk token middleware checks current credential status and preserves tena
   assert.equal(nextCalled, true);
   assert.equal(req.kiosk.tenantId, credential.tenantId);
 
+  KioskSession.findOne = () => ({ select: async () => null });
+  const revokedSessionResponse = response();
+  await protectKiosk(
+    { headers: { authorization: `Bearer ${token}` } },
+    revokedSessionResponse,
+    () => assert.fail('Revoked kiosk session must not proceed')
+  );
+  assert.equal(revokedSessionResponse.statusCode, 401);
+
+  KioskSession.findOne = () => ({
+    select: async () => ({ _id: '507f1f77bcf86cd799439099' })
+  });
   KioskCredential.findOne = () => ({ select: async () => null });
   const revokedResponse = response();
   await protectKiosk(

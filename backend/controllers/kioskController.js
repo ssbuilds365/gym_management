@@ -22,6 +22,13 @@ const config = require('../config/env');
 const faceRecognition = require('../services/faceRecognition');
 const { getAttendanceDayBounds } = require('../utils/attendanceDates');
 const { getMembershipExpiryWindow, isValidTimeZone } = require('../utils/membershipExpiry');
+const {
+  KIOSK_REFRESH_COOKIE_NAME,
+  kioskRefreshCookieOptions,
+  clearKioskRefreshCookie,
+  getKioskRefreshToken,
+  isTrustedKioskCookieRequest
+} = require('../utils/kioskRefreshCookie');
 
 const getKioskCapabilities = business => {
   const faceServiceReady = Boolean(
@@ -189,7 +196,7 @@ const hashRefreshToken = token =>
 const createRefreshSession = async credential => {
   const refreshToken = crypto.randomBytes(48).toString('base64url');
   try {
-    await KioskSession.create({
+    const session = await KioskSession.create({
       tenantId: credential.tenantId,
       businessId: credential.businessId,
       credentialId: credential.credentialId,
@@ -197,11 +204,11 @@ const createRefreshSession = async credential => {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       lastUsedAt: new Date()
     });
+    return { refreshToken, sessionId: String(session._id) };
   } catch (error) {
     if (error?.name === 'ValidationError') return null;
     throw error;
   }
-  return refreshToken;
 };
 
 exports.authenticateKiosk = async (req, res) => {
@@ -231,13 +238,18 @@ exports.authenticateKiosk = async (req, res) => {
       return res.status(401).json({ success: false, code: 'KIOSK_AUTH_INVALID', message: 'Invalid kiosk credentials.' });
     }
     await KioskCredential.updateOne({ _id: credential._id }, { $set: { lastUsedAt: new Date() } });
-    const token = signKioskToken(credential);
-    const refreshToken = await createRefreshSession(credential);
+    const refreshSession = await createRefreshSession(credential);
+    if (!refreshSession) throw new Error('Kiosk session could not be created.');
+    const token = signKioskToken(credential, refreshSession.sessionId);
+    res.cookie(
+      KIOSK_REFRESH_COOKIE_NAME,
+      refreshSession.refreshToken,
+      kioskRefreshCookieOptions(config.nodeEnv)
+    );
     const business = await Business.findById(credential.tenantId).select('businessName logoUrl faceAttendanceEnabled qrAttendanceEnabled timeZone');
     return res.json({
       success: true,
       token,
-      refreshToken,
       expiresInSeconds: 900,
       gym: {
         id: String(credential.businessId),
@@ -261,41 +273,53 @@ exports.renewKiosk = async (req, res) => {
         message: 'Kiosk authorization is not configured.'
       });
     }
-    const refreshToken = String(req.body?.refreshToken || '').trim();
+    if (!isTrustedKioskCookieRequest(req, config.allowedOrigins)) {
+      return res.status(403).json({
+        success: false,
+        code: 'KIOSK_CSRF_REJECTED',
+        message: 'Kiosk session renewal request was not accepted.'
+      });
+    }
+    const refreshToken = getKioskRefreshToken(req);
     if (!refreshToken) {
+      clearKioskRefreshCookie(res, config.nodeEnv);
       return res.status(401).json({
         success: false,
         code: 'KIOSK_REFRESH_REQUIRED',
         message: 'Persistent kiosk authorization is required.'
       });
     }
-    const session = await KioskSession.findOne({
-      refreshTokenHash: hashRefreshToken(refreshToken),
+    const refreshTokenHash = hashRefreshToken(refreshToken);
+    const existingSession = await KioskSession.findOne({
+      refreshTokenHash,
       revokedAt: null,
       expiresAt: { $gt: new Date() }
-    }).select('+refreshTokenHash');
-    if (!session) {
+    });
+    if (!existingSession) {
+      clearKioskRefreshCookie(res, config.nodeEnv);
       return res.status(401).json({
         success: false,
         code: 'KIOSK_REFRESH_INVALID',
         message: 'Persistent kiosk authorization is invalid or expired.'
       });
     }
+
     const credential = await KioskCredential.findOne({
-      credentialId: session.credentialId,
-      tenantId: session.tenantId,
-      businessId: session.businessId,
+      credentialId: existingSession.credentialId,
+      tenantId: existingSession.tenantId,
+      businessId: existingSession.businessId,
       active: true,
       revokedAt: null,
       $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
     });
     if (!credential) {
       await KioskSession.updateMany({
-        credentialId: session.credentialId,
-        tenantId: session.tenantId,
-        businessId: session.businessId,
+        credentialId: existingSession.credentialId,
+        tenantId: existingSession.tenantId,
+        businessId: existingSession.businessId,
         revokedAt: null
       }, { $set: { revokedAt: new Date() } });
+      clearKioskRefreshCookie(res, config.nodeEnv);
       return res.status(401).json({
         success: false,
         code: 'KIOSK_CREDENTIAL_REVOKED',
@@ -303,15 +327,38 @@ exports.renewKiosk = async (req, res) => {
       });
     }
 
-    session.revokedAt = new Date();
-    await session.save();
-    const rotatedRefreshToken = await createRefreshSession(credential);
-    const token = signKioskToken(credential);
     await KioskCredential.updateOne({ _id: credential._id }, { $set: { lastUsedAt: new Date() } });
+    const nextRefreshToken = crypto.randomBytes(48).toString('base64url');
+    const session = await KioskSession.findOneAndUpdate({
+      _id: existingSession._id,
+      refreshTokenHash,
+      revokedAt: null,
+      expiresAt: { $gt: new Date() }
+    }, {
+      $set: {
+        refreshTokenHash: hashRefreshToken(nextRefreshToken),
+        lastUsedAt: new Date()
+      }
+    }, {
+      new: true
+    });
+    if (!session) {
+      clearKioskRefreshCookie(res, config.nodeEnv);
+      return res.status(401).json({
+        success: false,
+        code: 'KIOSK_REFRESH_INVALID',
+        message: 'Persistent kiosk authorization is invalid or expired.'
+      });
+    }
+    const token = signKioskToken(credential, session._id);
+    res.cookie(
+      KIOSK_REFRESH_COOKIE_NAME,
+      nextRefreshToken,
+      kioskRefreshCookieOptions(config.nodeEnv)
+    );
     return res.json({
       success: true,
       token,
-      refreshToken: rotatedRefreshToken,
       expiresInSeconds: 900
     });
   } catch (error) {
@@ -321,19 +368,16 @@ exports.renewKiosk = async (req, res) => {
 };
 
 exports.lockKiosk = async (req, res) => {
-  const refreshToken = String(req.body?.refreshToken || '').trim();
-  if (refreshToken) {
-    await KioskSession.updateOne(
-      { refreshTokenHash: hashRefreshToken(refreshToken), revokedAt: null },
-      { $set: { revokedAt: new Date() } }
-    );
-  }
-  if (req.kiosk?.credentialId) {
-    await KioskSession.updateMany(
-      { credentialId: req.kiosk.credentialId, revokedAt: null },
-      { $set: { revokedAt: new Date() } }
-    );
-  }
+  await KioskSession.updateOne({
+    _id: req.kiosk.sessionId,
+    tenantId: req.kiosk.tenantId,
+    businessId: req.kiosk.businessId,
+    credentialId: req.kiosk.credentialId,
+    revokedAt: null
+  }, {
+    $set: { revokedAt: new Date() }
+  });
+  clearKioskRefreshCookie(res, config.nodeEnv);
   return res.json({ success: true, message: 'Kiosk locked.' });
 };
 

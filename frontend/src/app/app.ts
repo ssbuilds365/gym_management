@@ -23,6 +23,9 @@ import { SessionActivityService } from './services/session-activity';
 
 import { environment } from '../environments/environment';
 
+export const isAttendanceKioskUrl = (url: string): boolean =>
+  /^\/attendance-kiosk(?:\/|[?#]|$)/.test(url);
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -198,16 +201,19 @@ export class App implements OnInit, OnDestroy {
 
   // SESSION VERIFICATION
   verifySession(): void {
-    const currentUrl = this.router.url;
+    const currentUrl = isAttendanceKioskUrl(window.location.pathname)
+      ? window.location.pathname
+      : this.router.url;
     if (
       currentUrl.startsWith('/login') ||
       currentUrl.startsWith('/register') ||
       currentUrl.startsWith('/forgot-password') ||
       currentUrl.startsWith('/reset-password') ||
-      currentUrl.startsWith('/attendance-kiosk')
+      isAttendanceKioskUrl(currentUrl)
     ) {
       this.sessionChecking = false;
       this.sessionVerificationError = '';
+      this.sessionActivity.stop();
       return;
     }
 
@@ -234,6 +240,7 @@ export class App implements OnInit, OnDestroy {
       )
       .subscribe({
         next: (response) => {
+          if (this.isAttendanceKioskRoute()) return;
           if (
             response?.success === true &&
             response?.owner &&
@@ -264,6 +271,7 @@ export class App implements OnInit, OnDestroy {
           }
         },
         error: (error) => {
+          if (this.isAttendanceKioskRoute()) return;
           console.error('Session verification failed:', {
             status: error.status,
             code: error.error?.code
@@ -310,12 +318,15 @@ export class App implements OnInit, OnDestroy {
 
   // AUTH ROUTE CHECK
   get isAuthRoute(): boolean {
+    const currentUrl = isAttendanceKioskUrl(window.location.pathname)
+      ? window.location.pathname
+      : this.router.url;
     return (
-      this.router.url.startsWith('/register') ||
-      this.router.url.startsWith('/login') ||
-      this.router.url.startsWith('/forgot-password') ||
-      this.router.url.startsWith('/reset-password') ||
-      this.router.url.startsWith('/attendance-kiosk')
+      currentUrl.startsWith('/register') ||
+      currentUrl.startsWith('/login') ||
+      currentUrl.startsWith('/forgot-password') ||
+      currentUrl.startsWith('/reset-password') ||
+      isAttendanceKioskUrl(currentUrl)
     );
   }
 
@@ -369,7 +380,16 @@ export class App implements OnInit, OnDestroy {
   }
 
   private onSessionExpired(reason: 'inactive' | 'revoked'): void {
+    if (this.isAttendanceKioskRoute()) {
+      this.sessionActivity.stop();
+      return;
+    }
     this.handleInvalidSession(reason);
+  }
+
+  private isAttendanceKioskRoute(): boolean {
+    return isAttendanceKioskUrl(window.location.pathname) ||
+      isAttendanceKioskUrl(this.router.url);
   }
 
   // SIDEBAR MENU

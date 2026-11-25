@@ -48,7 +48,7 @@ const kioskFaceIdentifyRateLimit = rateLimit({
 
 router.post('/auth', kioskAuthRateLimit, authenticateKiosk);
 router.post('/renew', kioskAuthRateLimit, renewKiosk);
-router.post('/lock', kioskOperationRateLimit, lockKiosk);
+router.post('/lock', kioskOperationRateLimit, protectKiosk, lockKiosk);
 router.post('/enrollment/identify-member', kioskEnrollmentRateLimit, protectKiosk, identifyMemberForEnrollment);
 router.post('/enrollment/face', kioskEnrollmentRateLimit, protectKiosk, enrollMemberFace);
 router.post(

@@ -47,12 +47,14 @@ type StaffMember = {
 export class AttendanceKiosk implements OnInit, OnDestroy {
   @ViewChild('video', { static: false }) videoRef?: ElementRef<HTMLVideoElement>;
   @ViewChild('enrollmentVideo', { static: false }) enrollmentVideoRef?: ElementRef<HTMLVideoElement>;
-  private readonly refreshStorageKey = 'ssfm_kiosk_refresh';
 
   credentialId = '';
   kioskSecret = '';
   token = '';
   authorized = false;
+  kioskLocked = false;
+  lockingKiosk = false;
+  sessionRetryAvailable = false;
   authenticating = false;
   authError = '';
 
@@ -103,6 +105,9 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private kioskRenewTimer: ReturnType<typeof setInterval> | null = null;
   private continuousScanTimer: ReturnType<typeof setInterval> | null = null;
   private continuousScanInProgress = false;
+  private scanningRequested = false;
+  renewingKiosk = false;
+  private resumeKioskScanAfterRegistration = false;
   private recognitionCooldownUntil = 0;
   private resultTimer: ReturnType<typeof setTimeout> | null = null;
   private staffSearchSequence = 0;
@@ -126,12 +131,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     window.addEventListener('online', this.onNetworkStatusChange);
     window.addEventListener('offline', this.onNetworkStatusChange);
-    this.token = sessionStorage.getItem('ssfm_kiosk_token') || '';
-    if (this.token) {
-      this.validateStoredSession();
-    } else {
-      void this.renewStoredSession();
-    }
+    this.clearLegacyKioskStorage();
+    void this.renewStoredSession();
   }
 
   ngOnDestroy(): void {
@@ -150,6 +151,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     if (this.authenticating) return;
     this.authenticating = true;
     this.authError = '';
+    this.sessionRetryAvailable = false;
     this.http.post<any>(`${environment.apiUrl}/kiosk/auth`, {
       credentialId: this.credentialId.trim(),
       kioskSecret: this.kioskSecret
@@ -163,19 +165,10 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
           return;
         }
         const gym = response.gym || {};
-        try {
-          sessionStorage.setItem('ssfm_kiosk_gym', JSON.stringify(gym));
-          sessionStorage.setItem('ssfm_kiosk_token', response.token);
-          if (typeof response.refreshToken === 'string' && response.refreshToken) {
-            localStorage.setItem(this.refreshStorageKey, response.refreshToken);
-          }
-        } catch {
-          this.authError = 'This browser could not save the kiosk session. Check its storage settings and try again.';
-          return;
-        }
         this.token = response.token;
         this.authorized = true;
-        this.applyGymConfig(gym, false);
+        this.kioskLocked = false;
+        this.applyGymConfig(gym);
         this.kioskSecret = '';
         this.changeDetector.markForCheck();
         this.startRenewalTimer();
@@ -190,28 +183,7 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     });
   }
 
-  private validateStoredSession(): void {
-    this.http.get<any>(`${environment.apiUrl}/kiosk/config`, {
-      headers: this.kioskHeaders()
-    }).subscribe({
-      next: response => {
-        this.applyGymConfig(response.gym || {});
-        this.authorized = true;
-        this.changeDetector.markForCheck();
-        this.startRenewalTimer();
-        void this.requestWakeLock();
-      },
-      error: error => {
-        this.clearKioskSession();
-        this.authError = error.status === 401
-          ? 'Kiosk session expired. Enter the kiosk credentials to authorize again.'
-          : error.error?.message || 'Unable to verify the kiosk session. Authorize the kiosk again.';
-        this.changeDetector.markForCheck();
-      }
-    });
-  }
-
-  private applyGymConfig(gym: any, persist = true): void {
+  private applyGymConfig(gym: any): void {
     this.gymName = gym.name || this.gymName;
     this.gymLogoUrl = gym.logoUrl || '';
     this.gymId = String(gym.id || '');
@@ -219,24 +191,42 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.faceEnrollmentEnabled = Boolean(gym.faceEnrollmentEnabled);
     this.faceEnrollmentRequiresStaff = Boolean(gym.faceEnrollmentRequiresStaff);
     this.qrEnabled = Boolean(gym.qrAttendanceEnabled);
-    if (persist) sessionStorage.setItem('ssfm_kiosk_gym', JSON.stringify(gym));
   }
 
   logoutKiosk(): void {
+    if (!this.token || this.lockingKiosk) return;
+    this.lockingKiosk = true;
+    this.authError = '';
+    this.scanningRequested = false;
     this.stopCamera();
     void this.releaseWakeLock();
     if (this.kioskRenewTimer) clearInterval(this.kioskRenewTimer);
-    const refreshToken = localStorage.getItem(this.refreshStorageKey) || '';
-    if (this.token) {
-      this.http.post<any>(`${environment.apiUrl}/kiosk/lock`, { refreshToken }, {
-        headers: this.kioskHeaders()
-      }).subscribe({ error: () => undefined });
-    }
-    this.clearKioskSession();
+    this.http.post<any>(`${environment.apiUrl}/kiosk/lock`, {}, {
+      headers: this.kioskRequestHeaders()
+    }).subscribe({
+      next: () => {
+        this.clearKioskSession();
+        this.kioskLocked = true;
+        this.lockingKiosk = false;
+        this.changeDetector.markForCheck();
+      },
+      error: error => {
+        this.lockingKiosk = false;
+        if (error?.status === 401) {
+          this.clearKioskSession();
+          this.kioskLocked = true;
+          this.authError = 'The kiosk session is already invalid. Reauthorize this device to continue.';
+        } else {
+          this.authError = 'The kiosk could not be securely locked. Check the connection and retry.';
+        }
+        this.changeDetector.markForCheck();
+      }
+    });
   }
 
   openStaffRegistration(): void {
     if (!this.authorized || !this.faceEnrollmentRequiresStaff || this.scanning) return;
+    this.resumeKioskScanAfterRegistration = this.scanningRequested;
     this.stopCamera();
     this.staffRegistrationOpen = true;
     this.staffAuthStep = 'checking';
@@ -266,6 +256,11 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.staffSelectedMember = null;
     this.staffConsent = false;
     this.staffReplaceExisting = false;
+    const shouldResume = this.resumeKioskScanAfterRegistration;
+    this.resumeKioskScanAfterRegistration = false;
+    if (shouldResume && this.authorized && this.faceEnabled) {
+      void this.startKioskCamera();
+    }
   }
 
   backToStaffSearch(): void {
@@ -654,38 +649,70 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   private async renewStoredSession(): Promise<void> {
-    const refreshToken = localStorage.getItem(this.refreshStorageKey);
-    if (!refreshToken) return;
+    if (this.renewingKiosk) return;
+    this.renewingKiosk = true;
+    this.sessionRetryAvailable = false;
     try {
-      const response = await this.http.post<any>(`${environment.apiUrl}/kiosk/renew`, {
-        refreshToken
-      }).toPromise();
-      if (response?.success !== true || !response.token || !response.refreshToken) {
+      const response = await firstValueFrom(this.http.post<any>(
+        `${environment.apiUrl}/kiosk/renew`,
+        {},
+        { headers: this.kioskRequestHeaders() }
+      ));
+      if (response?.success !== true || !response.token) {
         throw new Error('Renewal response was incomplete.');
       }
       this.token = response.token;
-      sessionStorage.setItem('ssfm_kiosk_token', this.token);
-      localStorage.setItem(this.refreshStorageKey, response.refreshToken);
       this.authorized = true;
-      this.startRenewalTimer();
-      await this.validateStoredSessionAsync();
+      this.kioskLocked = false;
+      if (await this.validateKioskConfig()) {
+        this.startRenewalTimer();
+        void this.requestWakeLock();
+      }
     } catch (error: any) {
+      this.authorized = false;
+      this.token = '';
       if (error?.status === 401 || error?.status === 403) {
         this.clearKioskSession();
-        this.authError = error.error?.message || 'Kiosk authorization expired. Please authorize again.';
-        this.changeDetector.markForCheck();
+        this.authError = error?.error?.code === 'KIOSK_REFRESH_REQUIRED'
+          ? ''
+          : error?.error?.message || 'Kiosk authorization expired. Authorize this device again.';
+      } else {
+        this.authError = 'Unable to verify the kiosk session. Check the network and retry.';
+        this.sessionRetryAvailable = true;
       }
+    } finally {
+      this.renewingKiosk = false;
+      this.changeDetector.markForCheck();
     }
   }
 
-  private async validateStoredSessionAsync(): Promise<void> {
-    await this.http.get<any>(`${environment.apiUrl}/kiosk/config`, {
-      headers: this.kioskHeaders()
-    }).toPromise().then(response => {
+  private async validateKioskConfig(): Promise<boolean> {
+    try {
+      const response = await firstValueFrom(this.http.get<any>(`${environment.apiUrl}/kiosk/config`, {
+        headers: this.kioskHeaders()
+      }));
       this.applyGymConfig(response.gym || {});
       this.authorized = true;
-      this.changeDetector.markForCheck();
-    }).catch(() => this.clearKioskSession());
+      return true;
+    } catch (error: any) {
+      this.clearKioskSession();
+      this.authError = error?.status === 401
+        ? 'Kiosk authorization expired. Authorize this device again.'
+        : 'Unable to verify the kiosk session. Check the network and retry.';
+      this.sessionRetryAvailable = error?.status === 0 || error?.status >= 500;
+      return false;
+    }
+  }
+
+  retryKioskSession(): void {
+    this.authError = '';
+    void this.renewStoredSession();
+  }
+
+  private clearLegacyKioskStorage(): void {
+    sessionStorage.removeItem('ssfm_kiosk_token');
+    sessionStorage.removeItem('ssfm_kiosk_gym');
+    localStorage.removeItem('ssfm_kiosk_refresh');
   }
 
   async requestWakeLock(): Promise<void> {
@@ -713,6 +740,8 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible' && this.authorized) {
       void this.requestWakeLock();
+    } else {
+      void this.releaseWakeLock();
     }
   };
 
@@ -724,7 +753,9 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   async startFaceScan(): Promise<void> {
     if (!this.authorized || !this.faceEnabled || this.scanning || this.staffRegistrationOpen) return;
     const scanStartedAt = performance.now();
+    this.scanningRequested = true;
     this.result = null;
+    if (this.resultTimer) clearTimeout(this.resultTimer);
     this.cameraError = '';
     this.scanning = true;
     try {
@@ -765,11 +796,15 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   retryCamera(): void {
+    if (!this.authorized || !this.faceEnabled || this.staffRegistrationOpen) return;
+    this.scanningRequested = true;
+    this.cameraError = '';
     this.stopCamera();
     void this.startKioskCamera();
   }
 
   private async startKioskCamera(): Promise<void> {
+    if (!this.authorized || !this.faceEnabled || !this.scanningRequested || this.staffRegistrationOpen) return;
     await this.startCamera();
     if (!this.cameraActive) return;
     await this.loadFaceModels();
@@ -841,8 +876,22 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
           title: 'MEMBER ACCESS DENIED',
           message: 'This member is inactive or blocked. Please contact gym staff.'
         });
+      } else if (
+        error?.error?.code === 'UNKNOWN_FACE' ||
+        error?.error?.code === 'FACE_NOT_REGISTERED' ||
+        error?.status === 404
+      ) {
+        this.showResult({
+          type: 'not-found',
+          title: 'Face Not Recognized',
+          message: 'Face not recognized. Please try again or ask gym staff to register the member.'
+        });
       } else {
-        this.cameraStatus = this.getSafeFaceVerificationMessage(error);
+        this.showResult({
+          type: 'error',
+          title: 'Verification unavailable',
+          message: this.getSafeFaceVerificationMessage(error)
+        });
       }
     } finally {
       this.continuousScanInProgress = false;
@@ -999,7 +1048,15 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   private kioskHeaders(): HttpHeaders {
-    return new HttpHeaders({ Authorization: `Bearer ${this.token}` });
+    return this.token
+      ? new HttpHeaders({ Authorization: `Bearer ${this.token}` })
+      : new HttpHeaders();
+  }
+
+  private kioskRequestHeaders(): HttpHeaders {
+    let headers = new HttpHeaders({ 'X-Kiosk-Request': '1' });
+    if (this.token) headers = headers.set('Authorization', `Bearer ${this.token}`);
+    return headers;
   }
 
   private getSafeFaceVerificationMessage(error: any): string {
@@ -1030,9 +1087,19 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   private clearKioskSession(): void {
+    this.scanningRequested = false;
+    if (this.kioskRenewTimer) {
+      clearInterval(this.kioskRenewTimer);
+      this.kioskRenewTimer = null;
+    }
+    if (this.resultTimer) {
+      clearTimeout(this.resultTimer);
+      this.resultTimer = null;
+    }
+    this.stopCamera();
     sessionStorage.removeItem('ssfm_kiosk_token');
     sessionStorage.removeItem('ssfm_kiosk_gym');
-    localStorage.removeItem(this.refreshStorageKey);
+    localStorage.removeItem('ssfm_kiosk_refresh');
     this.token = '';
     this.authorized = false;
     this.gymId = '';
@@ -1040,9 +1107,11 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.faceEnrollmentEnabled = false;
     this.faceEnrollmentRequiresStaff = false;
     this.qrEnabled = false;
+    void this.releaseWakeLock();
   }
 
   private showCameraError(message: string): void {
+    this.scanningRequested = false;
     this.stopCamera();
     this.cameraError = message;
     this.showResult({ type: 'camera', title: 'Camera unavailable', message });
@@ -1054,6 +1123,10 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     this.resultTimer = setTimeout(() => {
       this.result = null;
       this.changeDetector.markForCheck();
+      if (this.scanningRequested && this.authorized && this.faceEnabled &&
+        !this.staffRegistrationOpen && !this.cameraError) {
+        void this.startKioskCamera();
+      }
     }, 5000);
   }
 
@@ -1064,8 +1137,12 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
 
   async qrCheckIn(): Promise<void> {
     if (!this.qrEnabled || this.staffRegistrationOpen) return;
+    this.stopCamera();
     const qrToken = window.prompt('Scan or enter the member QR token');
-    if (!qrToken?.trim()) return;
+    if (!qrToken?.trim()) {
+      if (this.scanningRequested) void this.startKioskCamera();
+      return;
+    }
     try {
       const response = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/qr/check-in`,
@@ -1127,6 +1204,16 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   closeResult(): void {
     if (this.resultTimer) clearTimeout(this.resultTimer);
     this.result = null;
+    if (this.scanningRequested && this.authorized && this.faceEnabled &&
+      !this.staffRegistrationOpen && !this.cameraError) {
+      void this.startKioskCamera();
+    }
+  }
+
+  cancelFaceScanning(): void {
+    this.scanningRequested = false;
+    this.scanning = false;
+    this.stopCamera();
   }
 
   private stopCamera(): void {
