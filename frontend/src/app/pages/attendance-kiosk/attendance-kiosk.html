@@ -166,17 +166,35 @@
         <p class="auth-error" *ngIf="staffSearchError" role="alert">{{ staffSearchError }}</p>
         <p class="face-config-warning" *ngIf="staffFaceStatusWarning" role="status">{{ staffFaceStatusWarning }}</p>
         <div class="staff-member-results" *ngIf="staffMembers.length">
-          <button type="button" class="staff-member-result" *ngFor="let member of staffMembers"
-            (click)="selectStaffMember(member)" [disabled]="member.faceStatus === 'Unavailable'">
+          <article class="staff-member-result" *ngFor="let member of staffMembers">
             <span class="staff-member-info">
               <strong>{{ member.fullName }}</strong>
               <small>ID: {{ member.legacyMemberId || member._id }} · {{ member.phone }}</small>
               <small>Member: {{ member.status }} · Membership: {{ member.membership?.status || 'No record' }}
+                <ng-container *ngIf="member.membership?.planId?.planName as planName"> · {{ planName }}</ng-container>
                 <ng-container *ngIf="member.membership?.endDate"> · until {{ member.membership.endDate | date:'mediumDate' }}</ng-container>
               </small>
-              <small>Face: {{ member.faceStatus || 'Checking…' }}</small>
+              <small class="member-face-status" [class.registered]="member.faceStatus === 'Registered'">
+                Face: {{ member.faceStatus === 'NotRegistered' ? 'Not Registered' : member.faceStatus || 'Checking…' }}
+              </small>
+              <small class="member-enrollment-warning" *ngIf="member.status !== 'Active'">
+                Enrollment unavailable: this member is {{ member.status.toLowerCase() }}.
+              </small>
+              <small class="member-enrollment-warning" *ngIf="member.faceStatus === 'Unavailable'">
+                Face status could not be checked. Retry the search before continuing.
+              </small>
             </span>
-          </button>
+            <button type="button" class="member-face-action primary-action"
+              *ngIf="member.status === 'Active' && member.faceStatus === 'NotRegistered'"
+              (click)="selectStaffMember(member)">
+              Register Face
+            </button>
+            <button type="button" class="member-face-action primary-action update"
+              *ngIf="member.status === 'Active' && (member.faceStatus === 'Registered' || member.faceStatus === 'MigrationRequired')"
+              (click)="selectStaffMember(member)">
+              Update Face
+            </button>
+          </article>
         </div>
         <p class="muted-copy" *ngIf="!staffSearchLoading && staffSearchTerm.trim().length >= 2 && !staffMembers.length && !staffSearchError">
           No matching members. Search by another name, ID, or phone number.

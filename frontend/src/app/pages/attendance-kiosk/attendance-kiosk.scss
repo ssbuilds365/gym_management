@@ -473,30 +473,23 @@
 }
 .self-enrollment-success h3 { margin:5px 0; color:#eafff8; }
 .self-enrollment-success p { margin:4px 0 14px; color:#b2d7cb; }
-.staff-member-results {
-  display: grid;
-  gap: 8px;
-  max-height: 310px;
-  margin-top: 16px;
-  overflow-y: auto;
-}
+.staff-member-results { display:grid; gap:8px; max-height:310px; margin-top:16px; overflow-y:auto; }
 .staff-member-result {
-  width: 100%;
-  padding: 13px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255,255,255,.035);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
 }
-.staff-member-result:hover:not(:disabled) {
-  border-color: rgba(69,224,177,.48);
-  background: rgba(32,201,151,.08);
-}
-.staff-member-result:disabled { opacity: .58; cursor: not-allowed; }
-.staff-member-info { min-width: 0; display: grid; gap: 3px; }
-.staff-member-info small { color: var(--muted); line-height: 1.4; overflow-wrap: anywhere; }
+.staff-member-info { min-width:0; display:grid; gap:3px; }
+.staff-member-info small { color:var(--muted); line-height:1.4; overflow-wrap:anywhere; }
+.staff-member-info .member-face-status { color:#ffd28b; font-weight:800; }
+.staff-member-info .member-face-status.registered { color:#73e5b7; }
+.member-face-action { min-height:48px; font-weight:900; }
+.member-face-action.update { background:linear-gradient(135deg,#397ff3,#213e87); color:#fff; }
 .muted-copy { color: var(--muted); font-size: 13px; }
 
 .result-card {
@@ -552,6 +545,8 @@
   .self-registration-actions { flex-direction:column; }
   .self-registration-actions button { width:100%; }
   .self-registration-card { border-radius:20px; }
+  .staff-member-result { grid-template-columns: minmax(0, 1fr); }
+  .member-face-action { width:100%; }
 }
 
 @media (orientation: landscape) and (max-height: 520px) {

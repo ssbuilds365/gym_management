@@ -6,6 +6,7 @@ import { of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { sessionCookieInterceptor } from '../../interceptors/session-cookie.interceptor';
 import { CameraService } from '../../services/camera';
+import { FaceRecognitionService } from '../../services/face-recognition';
 import { MemberService } from '../../services/member';
 import { AttendanceKiosk } from './attendance-kiosk';
 
@@ -230,6 +231,30 @@ describe('AttendanceKiosk authorization', () => {
     expect(message).not.toContain('internal detail');
   });
 
+  it('uses the existing member search API for names, member IDs, and mobile numbers', async () => {
+    await restoreAuthorizedKiosk({
+      id: 'business-id',
+      name: 'Test Gym',
+      faceEnrollmentRequiresStaff: true
+    });
+    const component = fixture.componentInstance;
+    component.staffAuthStep = 'authorized';
+    const searchTerms = ['Omkar', 'M-208', '5550100'];
+
+    for (const searchTerm of searchTerms) {
+      component.staffSearchTerm = searchTerm;
+      const searchPromise = component.searchStaffMembers();
+      httpTestingController.expectOne(request =>
+        request.url === `${environment.apiUrl}/members` &&
+        request.params.get('search') === searchTerm
+      ).flush({ success: true, members: [] });
+      await searchPromise;
+    }
+
+    expect(component.staffSearchError).toBe('');
+    expect(component.staffMembers).toEqual([]);
+  });
+
   it('searches tenant-scoped members and displays the returned face status after owner verification', async () => {
     await restoreAuthorizedKiosk({
       id: 'business-id',
@@ -280,11 +305,98 @@ describe('AttendanceKiosk authorization', () => {
 
     expect(component.staffMembers[0].faceStatus).toBe('Registered');
     expect(component.staffMembers[0].registeredAt).toBe('2025-01-01T10:00:00.000Z');
-    component.selectStaffMember(component.staffMembers[0]);
+    fixture.detectChanges();
+    const updateButton = fixture.nativeElement.querySelector('.member-face-action.update') as HTMLButtonElement;
+    expect(updateButton.textContent).toContain('Update Face');
+    expect(fixture.nativeElement.querySelector('.member-face-action:not(.update)')).toBeNull();
+    updateButton.click();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Alex Member');
     expect(fixture.nativeElement.textContent).toContain('M-104');
     expect(fixture.nativeElement.textContent).toContain('Face registration: Registered');
+  });
+
+  it('shows Register Face on a not-registered result and selects that exact member', async () => {
+    await rejectInitialRenewal();
+    const component = fixture.componentInstance;
+    component.authorized = true;
+    component.faceEnrollmentRequiresStaff = true;
+    component.staffRegistrationOpen = true;
+    component.staffAuthStep = 'authorized';
+    component.staffMembers = [{
+      _id: 'member-omkar',
+      legacyMemberId: 'M-208',
+      fullName: 'Omkar',
+      phone: '5550100',
+      status: 'Active',
+      membership: { status: 'Active', endDate: '2030-01-01' },
+      faceStatus: 'NotRegistered'
+    }];
+    fixture.detectChanges();
+
+    const registerButton = fixture.nativeElement.querySelector('.member-face-action') as HTMLButtonElement;
+    expect(registerButton.textContent).toContain('Register Face');
+    expect(fixture.nativeElement.querySelector('.member-face-action.update')).toBeNull();
+    registerButton.click();
+    fixture.detectChanges();
+
+    expect(component.staffSelectedMember?._id).toBe('member-omkar');
+    expect(fixture.nativeElement.textContent).toContain('Omkar');
+    expect(fixture.nativeElement.textContent).toContain('M-208');
+    expect(fixture.nativeElement.textContent).toContain('Face registration: NotRegistered');
+    const startCameraButton = fixture.nativeElement.querySelector('.self-registration-actions .primary-action') as HTMLButtonElement;
+    expect(startCameraButton.disabled).toBe(true);
+    expect(component.staffConsent).toBe(false);
+  });
+
+  it('does not offer enrollment for an inactive member', async () => {
+    await rejectInitialRenewal();
+    const component = fixture.componentInstance;
+    component.staffRegistrationOpen = true;
+    component.staffAuthStep = 'authorized';
+    component.staffMembers = [{
+      _id: 'inactive-member',
+      fullName: 'Inactive Member',
+      phone: '5550100',
+      status: 'Inactive',
+      faceStatus: 'NotRegistered'
+    }];
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.member-face-action')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain(
+      'Enrollment unavailable: this member is inactive.'
+    );
+    component.selectStaffMember(component.staffMembers[0]);
+    expect(component.staffSelectedMember).toBeNull();
+  });
+
+  it('requires explicit replacement authorization and confirmation for Update Face', async () => {
+    const component = fixture.componentInstance;
+    component.staffAuthStep = 'authorized';
+    component.staffConsent = true;
+    component.staffSelectedMember = {
+      _id: 'registered-member',
+      fullName: 'Registered Member',
+      phone: '5550100',
+      status: 'Active',
+      faceStatus: 'Registered'
+    };
+    component.enrollmentCameraActive = true;
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await component.captureStaffEnrollment();
+    expect(component.staffEnrollmentError).toContain('Confirm replacement');
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    component.staffReplaceExisting = true;
+    await component.captureStaffEnrollment();
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Replace Registered Member's existing face registration?"
+    );
+    httpTestingController.expectNone(`${environment.apiUrl}/kiosk/staff/enrollment/face/registered-member`);
+    confirmSpy.mockRestore();
   });
 
   it('sends staff samples to the kiosk route with consent and the kiosk bearer token', () => {
@@ -325,16 +437,18 @@ describe('AttendanceKiosk authorization', () => {
     component.faceEnrollmentRequiresStaff = true;
     component.staffRegistrationOpen = true;
     component.staffAuthStep = 'authorized';
-    component.staffConsent = true;
-    component.staffSelectedMember = {
+    component.staffMembers = [{
       _id: 'member-id',
       legacyMemberId: 'M-104',
       fullName: 'Alex Member',
       phone: '5550100',
       status: 'Active',
       faceStatus: 'NotRegistered'
-    };
+    }];
     fixture.detectChanges();
+    (fixture.nativeElement.querySelector('.member-face-action') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    component.staffConsent = true;
 
     await component.startStaffEnrollmentCamera();
     expect(cameraOpen).toHaveBeenCalledOnce();
@@ -346,7 +460,83 @@ describe('AttendanceKiosk authorization', () => {
     expect(component.staffRegistrationOpen).toBe(false);
   });
 
-  it('locks the kiosk through the server and confirms the locked state only after revocation', () => {
+  it('updates the selected search result only after the backend confirms enrollment', async () => {
+    await rejectInitialRenewal();
+    const component = fixture.componentInstance;
+    const member = {
+      _id: 'member-omkar',
+      legacyMemberId: 'M-208',
+      fullName: 'Omkar',
+      phone: '5550100',
+      status: 'Active',
+      membership: { status: 'Active', endDate: '2030-01-01' },
+      faceStatus: 'NotRegistered'
+    };
+    component.authorized = true;
+    component.token = 'kiosk-access-token';
+    component.faceEnrollmentRequiresStaff = true;
+    component.staffRegistrationOpen = true;
+    component.staffAuthStep = 'authorized';
+    component.staffMembers = [member];
+    fixture.detectChanges();
+
+    (fixture.nativeElement.querySelector('.member-face-action') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    component.staffConsent = true;
+    fixture.detectChanges();
+
+    const camera = TestBed.inject(CameraService);
+    vi.spyOn(camera, 'open').mockResolvedValue({ getTracks: () => [] } as unknown as MediaStream);
+    await component.startStaffEnrollmentCamera();
+
+    const faceRecognition = TestBed.inject(FaceRecognitionService);
+    vi.spyOn(faceRecognition, 'load').mockResolvedValue();
+    vi.spyOn(faceRecognition, 'detectSingleFace').mockResolvedValue({
+      x: 10, y: 10, width: 100, height: 100
+    });
+    vi.spyOn(faceRecognition, 'isStable').mockReturnValue(true);
+    vi.spyOn(faceRecognition, 'captureImage').mockReturnValue('data:image/jpeg;base64,c2FtcGxl');
+    vi.spyOn(faceRecognition, 'validateEnrollmentSamples').mockImplementation(() => undefined);
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      callback(0);
+      return 1;
+    });
+
+    const enrollmentPromise = component.captureStaffEnrollment();
+    let registrationRequest: any;
+    await vi.waitFor(() => {
+      const requests = httpTestingController.match(
+        `${environment.apiUrl}/kiosk/staff/enrollment/face/member-omkar`
+      );
+      if (!requests.length) throw new Error('Waiting for staff registration request.');
+      expect(requests).toHaveLength(1);
+      registrationRequest = requests[0];
+    });
+    expect(registrationRequest.request.body).toEqual({
+      images: Array(3).fill('data:image/jpeg;base64,c2FtcGxl'),
+      consentGranted: true,
+      consentTextVersion: 'kiosk-staff-face-consent-v1',
+      replaceExisting: false
+    });
+    expect(registrationRequest.request.headers.get('Authorization')).toBe('Bearer kiosk-access-token');
+
+    registrationRequest.flush({
+      success: true,
+      status: 'Registered',
+      registeredAt: '2026-11-25T10:00:00.000Z'
+    });
+    await enrollmentPromise;
+    fixture.changeDetectorRef.detectChanges();
+
+    expect(component.staffEnrollmentSuccess).toBe(true);
+    expect(component.staffSelectedMember?.faceStatus).toBe('Registered');
+    expect(component.staffMembers[0].faceStatus).toBe('Registered');
+    expect(fixture.nativeElement.textContent).toContain('Face Registered Successfully');
+    expect(fixture.nativeElement.textContent).toContain('Status: Registered');
+  });
+
+  it('locks the kiosk through the server and confirms the locked state only after revocation', async () => {
+    await rejectInitialRenewal();
     const component = fixture.componentInstance;
     component.authorized = true;
     component.token = 'in-memory-access-token';
@@ -364,7 +554,8 @@ describe('AttendanceKiosk authorization', () => {
     expect(component.token).toBe('');
   });
 
-  it('resumes kiosk scanning after the staff registration flow closes when scanning was active', () => {
+  it('resumes kiosk scanning after the staff registration flow closes when scanning was active', async () => {
+    await rejectInitialRenewal();
     const component = fixture.componentInstance;
     component.authorized = true;
     component.faceEnabled = true;
@@ -379,7 +570,8 @@ describe('AttendanceKiosk authorization', () => {
     expect(component.staffRegistrationOpen).toBe(false);
   });
 
-  it('explains invalid model descriptor responses without exposing internal details', () => {
+  it('explains invalid model descriptor responses without exposing internal details', async () => {
+    await rejectInitialRenewal();
     const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
       error: { code: 'INVALID_FACE_DESCRIPTOR', message: 'internal detail' },
       status: 503
@@ -389,7 +581,8 @@ describe('AttendanceKiosk authorization', () => {
     expect(message).not.toContain('internal detail');
   });
 
-  it('shows the allowlisted backend descriptor validation message', () => {
+  it('shows the allowlisted backend descriptor validation message', async () => {
+    await rejectInitialRenewal();
     const message = (fixture.componentInstance as any).getEnrollmentErrorMessage({
       error: {
         code: 'INVALID_FACE_DESCRIPTOR',
@@ -422,7 +615,8 @@ describe('AttendanceKiosk authorization', () => {
     expect(fixture.nativeElement.querySelector('.authorization')).not.toBeNull();
   });
 
-  it('preserves kiosk bearer headers without changing dashboard cookie authentication', () => {
+  it('preserves kiosk bearer headers without changing dashboard cookie authentication', async () => {
+    await rejectInitialRenewal();
     const kioskRequest = new HttpRequest(
       'GET',
       `${environment.apiUrl}/kiosk/config`,

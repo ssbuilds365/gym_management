@@ -398,7 +398,11 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   }
 
   selectStaffMember(member: StaffMember): void {
-    if (!member.faceStatus || member.faceStatus === 'Unavailable') return;
+    if (
+      member.status !== 'Active' ||
+      !member.faceStatus ||
+      member.faceStatus === 'Unavailable'
+    ) return;
     this.stopEnrollmentCamera();
     this.staffSelectedMember = member;
     this.staffConsent = false;
@@ -526,6 +530,11 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         faceStatus: 'Registered',
         registeredAt: this.staffRegistrationAt || null
       };
+      this.staffMembers = this.staffMembers.map(result =>
+        result._id === member._id
+          ? { ...result, faceStatus: 'Registered', registeredAt: this.staffRegistrationAt || null }
+          : result
+      );
       this.stopEnrollmentCamera();
     } catch (error: any) {
       const code = error?.error?.code;
