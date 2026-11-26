@@ -189,11 +189,24 @@
         </div>
 
       </div>
-      <small *ngIf="paymentCategory === 'gym-membership' && selectedMembership?.gstSnapshot?.enabled">
-        Taxable amount: ₹{{ selectedMembership.gstSnapshot.taxableAmount | number:'1.2-2' }}
-        · GST {{ selectedMembership.gstSnapshot.gstPercentage }}%
-        · {{ selectedMembership.gstSnapshot.taxInclusive ? 'Inclusive' : 'Exclusive' }}
-      </small>
+      <div class="gst-payment-summary" *ngIf="paymentCategory === 'gym-membership' && selectedMembership">
+        <small *ngIf="gstSettingsLoading" role="status">Loading current business GST settings…</small>
+        <small *ngIf="gstSettingsError" class="error-message" role="alert">{{ gstSettingsError }}</small>
+        <small *ngIf="gstSettings && gstSettings.gstEnabled">
+          Current business GST setting: {{ gstSettings.gstPercentage }}%.
+        </small>
+        <ng-container *ngIf="selectedMembership.gstSnapshot?.enabled">
+          <strong>Saved GST invoice details</strong>
+          <small>Taxable amount: ₹{{ selectedMembership.gstSnapshot.taxableAmount | number:'1.2-2' }}</small>
+          <small>GST rate: {{ selectedMembership.gstSnapshot.gstPercentage }}%</small>
+          <small>GST amount: ₹{{ selectedMembership.gstSnapshot.totalTax | number:'1.2-2' }}</small>
+          <small>Final amount including GST: ₹{{ selectedMembership.gstSnapshot.totalAmount | number:'1.2-2' }}</small>
+          <small>{{ selectedMembership.gstSnapshot.taxInclusive ? 'Tax-inclusive pricing' : 'Tax-exclusive pricing' }} · payment uses the saved membership tax invoice.</small>
+        </ng-container>
+        <small *ngIf="gstSettings?.gstEnabled && !selectedMembership.gstSnapshot?.enabled">
+          This membership was assigned with GST disabled. Its saved price is preserved; current GST settings do not reprice existing memberships.
+        </small>
+      </div>
 
       <div class="form-grid">
 

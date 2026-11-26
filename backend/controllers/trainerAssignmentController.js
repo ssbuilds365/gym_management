@@ -92,31 +92,45 @@ exports.getTrainerAssignments = async (req, res) => {
     }).select('_id name status').lean();
     if (!trainer) return res.status(404).json({ success: false, message: 'Trainer not found' });
 
-    const [members, history] = await Promise.all([
-      Member.find({
+    const [activeAssignments, history] = await Promise.all([
+      TrainerAssignment.find({
         tenantId: req.tenantId,
         businessId: req.owner.businessId,
-        deletedAt: null,
-        $or: [
-          { assignedTrainerId: trainer._id },
-          { additionalTrainerIds: trainer._id }
-        ]
-      }).select('_id fullName phone email status assignedTrainerId additionalTrainerIds').sort({ fullName: 1 }).lean(),
+        trainerId: trainer._id,
+        status: 'Active'
+      }).select('memberId assignmentRole').lean(),
       TrainerAssignment.find({
         tenantId: req.tenantId,
         businessId: req.owner.businessId,
         trainerId: trainer._id
       }).sort({ assignedAt: -1 }).lean()
     ]);
+    const assignmentByMember = new Map(
+      activeAssignments.map(assignment => [String(assignment.memberId), assignment])
+    );
+    const members = await Member.find({
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      deletedAt: null,
+      $or: [
+        { assignedTrainerId: trainer._id },
+        { additionalTrainerIds: trainer._id },
+        { _id: { $in: activeAssignments.map(assignment => assignment.memberId) } }
+      ]
+    }).select('_id fullName phone email status assignedTrainerId additionalTrainerIds')
+      .sort({ fullName: 1 })
+      .lean();
 
     return res.json({
       success: true,
       trainer,
       members: members.map(member => ({
         ...member,
-        assignmentRole: String(member.assignedTrainerId) === String(trainer._id)
+        memberId: String(member._id).slice(-6).toUpperCase(),
+        assignmentRole: assignmentByMember.get(String(member._id))?.assignmentRole
+          || (String(member.assignedTrainerId) === String(trainer._id)
           ? 'Primary'
-          : 'Additional'
+          : 'Additional')
       })),
       history
     });

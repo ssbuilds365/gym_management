@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Member = require('../models/Member');
-const { searchAssignableMembers } = require('../controllers/trainerAssignmentController');
+const TrainerStaff = require('../models/TrainerStaff');
+const TrainerAssignment = require('../models/TrainerAssignment');
+const {
+  searchAssignableMembers,
+  getTrainerAssignments
+} = require('../controllers/trainerAssignmentController');
 
 const response = () => ({
   statusCode: 200,
@@ -144,4 +149,77 @@ test('trainer member search caps oversized result pages at twenty records', asyn
   assert.equal(requestedLimit, 21);
   assert.equal(res.body.members.length, 20);
   assert.equal(res.body.pagination.hasMore, true);
+});
+
+test('trainer assignments include canonical assignment records and remain tenant-scoped', async t => {
+  const trainerId = '507f1f77bcf86cd799439011';
+  const assignedMemberId = '507f1f77bcf86cd799439012';
+  const legacyMemberId = '507f1f77bcf86cd799439013';
+  let memberFilter;
+  const trainer = { _id: trainerId, name: 'Trainer', status: 'Active' };
+  t.mock.method(TrainerStaff, 'findOne', filter => {
+    assert.equal(filter._id, trainerId);
+    assert.equal(filter.tenantId, 'authenticated-tenant');
+    return {
+      select() { return this; },
+      lean: async () => trainer
+    };
+  });
+  let assignmentFindCalls = 0;
+  t.mock.method(TrainerAssignment, 'find', filter => {
+    assert.equal(filter.tenantId, 'authenticated-tenant');
+    assert.equal(filter.businessId, 'authenticated-business');
+    assert.equal(filter.trainerId, trainerId);
+    assignmentFindCalls += 1;
+    if (filter.status) {
+      assert.equal(filter.status, 'Active');
+      return {
+        select() { return this; },
+        lean: async () => [{ memberId: assignedMemberId, assignmentRole: 'Additional' }]
+      };
+    }
+    return {
+      sort() { return this; },
+      lean: async () => []
+    };
+  });
+  t.mock.method(Member, 'find', filter => {
+    memberFilter = filter;
+    return {
+      select() { return this; },
+      sort() { return this; },
+      lean: async () => [
+        {
+          _id: assignedMemberId,
+          fullName: 'Canonical assignment',
+          phone: '5551234',
+          assignedTrainerId: null,
+          additionalTrainerIds: []
+        },
+        {
+          _id: legacyMemberId,
+          fullName: 'Legacy assignment',
+          phone: '5555678',
+          assignedTrainerId: trainerId,
+          additionalTrainerIds: []
+        }
+      ]
+    };
+  });
+
+  const res = response();
+  await getTrainerAssignments({
+    params: { id: trainerId },
+    tenantId: 'authenticated-tenant',
+    owner: { businessId: 'authenticated-business' }
+  }, res);
+
+  assert.equal(assignmentFindCalls, 2);
+  assert.equal(memberFilter.tenantId, 'authenticated-tenant');
+  assert.equal(memberFilter.businessId, 'authenticated-business');
+  assert.equal(memberFilter.deletedAt, null);
+  assert.deepEqual(memberFilter.$or[2]._id.$in, [assignedMemberId]);
+  assert.equal(res.body.members[0].assignmentRole, 'Additional');
+  assert.equal(res.body.members[0].memberId, '439012');
+  assert.equal(res.body.members[1].assignmentRole, 'Primary');
 });

@@ -14,6 +14,7 @@ import { finalize, Subscription } from 'rxjs';
 
 import { PaymentService } from '../../services/payment';
 import { DashboardService } from '../../services/dashboard';
+import { ManagementService } from '../../services/management';
 import { environment } from '../../../environments/environment';
 import { jsPDF } from 'jspdf';
 import { GST_STATES } from '../../utils/gst-states';
@@ -62,6 +63,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
   private queuedPaymentPage?: number;
   private lastLoadedAt = 0;
   private eligibleMembersRequest?: Subscription;
+  private gstSettingsRequest?: Subscription;
   private ptPaymentRequestId = '';
   private ptPaymentRequestFingerprint = '';
 
@@ -75,6 +77,9 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
   successMessage = '';
   receiptErrorMessage = '';
   readonly gstStates = GST_STATES;
+  gstSettingsLoading = false;
+  gstSettingsError = '';
+  gstSettings: { gstEnabled: boolean; gstPercentage: number } | null = null;
 
   showPaymentForm = false;
 
@@ -95,6 +100,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
   constructor(
     private paymentService: PaymentService,
     private dashboardService: DashboardService,
+    private managementService: ManagementService,
     private changeDetector: ChangeDetectorRef
   ) {}
 
@@ -104,6 +110,7 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.eligibleMembersRequest?.unsubscribe();
+    this.gstSettingsRequest?.unsubscribe();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -114,7 +121,10 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
       (!this.lastLoadedAt || Date.now() - this.lastLoadedAt >= 60_000)
     ) {
       this.loadPayments();
-      if (this.showPaymentForm) this.loadEligibleMembers();
+      if (this.showPaymentForm) {
+        this.loadEligibleMembers();
+        this.loadGSTSettings();
+      }
     }
   }
 
@@ -193,6 +203,36 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     });
   }
 
+  private loadGSTSettings(): void {
+    this.gstSettingsRequest?.unsubscribe();
+    this.gstSettingsLoading = true;
+    this.gstSettingsError = '';
+    this.gstSettingsRequest = this.managementService.getSettings()
+      .pipe(finalize(() => {
+        this.gstSettingsLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          const business = response?.business;
+          if (!business || typeof business.gstEnabled !== 'boolean') {
+            this.gstSettings = null;
+            this.gstSettingsError = 'Saved GST settings were not returned.';
+            return;
+          }
+          this.gstSettings = {
+            gstEnabled: business.gstEnabled,
+            gstPercentage: Number(business.gstPercentage || 0)
+          };
+        },
+        error: error => {
+          console.error('Payment GST settings loading error:', error);
+          this.gstSettings = null;
+          this.gstSettingsError = error.error?.message || 'Unable to load saved GST settings.';
+        }
+      });
+  }
+
   onPaymentCategoryChange(): void {
     this.selectedMemberId = '';
     this.selectedMembershipId = '';
@@ -206,7 +246,10 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     if (this.paymentCategory === 'personal-training' && this.paymentForm.paymentMethod === 'Razorpay') {
       this.paymentForm.paymentMethod = 'Cash';
     }
-    if (this.showPaymentForm) this.loadEligibleMembers();
+    if (this.showPaymentForm) {
+      this.loadEligibleMembers();
+      if (this.paymentCategory === 'gym-membership') this.loadGSTSettings();
+    }
   }
 
   // Open payment form
@@ -214,13 +257,18 @@ export class Payments implements OnInit, OnChanges, OnDestroy {
     this.showPaymentForm = true;
     this.successMessage = '';
     this.errorMessage = '';
+    this.loadGSTSettings();
     this.loadEligibleMembers();
   }
 
   // Close payment form
   closePaymentForm(): void {
     this.eligibleMembersRequest?.unsubscribe();
+    this.gstSettingsRequest?.unsubscribe();
     this.membersLoading = false;
+    this.gstSettingsLoading = false;
+    this.gstSettings = null;
+    this.gstSettingsError = '';
     this.showPaymentForm = false;
     this.selectedMemberId = '';
     this.selectedMembershipId = '';

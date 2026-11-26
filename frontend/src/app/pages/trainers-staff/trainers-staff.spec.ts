@@ -14,6 +14,8 @@ describe('TrainersStaff', () => {
     createStaff: ReturnType<typeof vi.fn>;
     updateStaff: ReturnType<typeof vi.fn>;
     getTrainerAssignments: ReturnType<typeof vi.fn>;
+    getTrainerPTPackages: ReturnType<typeof vi.fn>;
+    createTrainerPTPackage: ReturnType<typeof vi.fn>;
     searchAssignableMembers: ReturnType<typeof vi.fn>;
     assignMemberToTrainer: ReturnType<typeof vi.fn>;
   };
@@ -59,6 +61,8 @@ describe('TrainersStaff', () => {
       createStaff: vi.fn().mockReturnValue(of({ success: true })),
       updateStaff: vi.fn().mockReturnValue(of({ success: true })),
       getTrainerAssignments: vi.fn().mockReturnValue(of({ members: [] })),
+      getTrainerPTPackages: vi.fn().mockReturnValue(of({ packages: [] })),
+      createTrainerPTPackage: vi.fn().mockReturnValue(of({ success: true })),
       searchAssignableMembers: vi.fn().mockReturnValue(of({
         members: [],
         pagination: { hasMore: false }
@@ -201,6 +205,89 @@ describe('TrainersStaff', () => {
       false
     );
     expect(component.selectedMemberId).toBe('');
+  });
+
+  it('loads the selected trainer’s fresh assigned members for PT packages', () => {
+    management.getTrainerAssignments.mockReturnValue(of({
+      members: [{
+        _id: 'member-1',
+        fullName: 'Santosh',
+        phone: '9833788644',
+        memberId: 'B3D3BC',
+        assignmentRole: 'Primary'
+      }]
+    }));
+    const trainer = {
+      _id: 'trainer-1',
+      name: 'Alex Trainer',
+      phone: '',
+      email: '',
+      role: 'Trainer' as const,
+      status: 'Active' as const
+    };
+
+    component.openPTPackages(trainer);
+    fixture.detectChanges();
+
+    expect(management.getTrainerAssignments).toHaveBeenCalledWith('trainer-1');
+    expect(component.ptAssignedMembers).toEqual([{
+      _id: 'member-1',
+      fullName: 'Santosh',
+      phone: '9833788644',
+      memberId: 'B3D3BC'
+    }]);
+    const options = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('select[name="ptMember"] option')
+    ).map(option => option.textContent?.trim());
+    expect(options).toContain('Santosh · ID B3D3BC · 9833788644');
+  });
+
+  it('shows empty and error states when trainer-assigned members cannot be loaded', () => {
+    const trainer = {
+      _id: 'trainer-1',
+      name: 'Alex Trainer',
+      phone: '',
+      email: '',
+      role: 'Trainer' as const,
+      status: 'Active' as const
+    };
+    component.openPTPackages(trainer);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('No members are currently assigned');
+
+    management.getTrainerAssignments.mockReturnValueOnce(of({
+      members: undefined
+    }));
+    component.openPTPackages(trainer);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Unable to load members assigned');
+  });
+
+  it('sends the selected assigned member ID when creating a PT package', () => {
+    component.ptTrainer = {
+      _id: 'trainer-1',
+      name: 'Alex Trainer',
+      phone: '',
+      email: '',
+      role: 'Trainer',
+      status: 'Active'
+    };
+    component.ptPackageForm = {
+      memberId: 'member-1',
+      packageName: 'PT Monthly',
+      packageType: 'Monthly',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      totalFee: 500,
+      paymentFrequency: 'Monthly'
+    };
+
+    component.createPTPackage();
+
+    expect(management.createTrainerPTPackage).toHaveBeenCalledWith(
+      'trainer-1',
+      expect.objectContaining({ memberId: 'member-1' })
+    );
   });
 
   it('shows PT financial figures without gym membership attribution', () => {

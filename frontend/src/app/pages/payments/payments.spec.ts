@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 import { Payments } from './payments';
 import { PaymentService } from '../../services/payment';
 import { DashboardService } from '../../services/dashboard';
+import { ManagementService } from '../../services/management';
 
 describe('Payments', () => {
   let component: Payments;
@@ -13,6 +14,9 @@ describe('Payments', () => {
     getPayments: ReturnType<typeof vi.fn>;
     createPayment: ReturnType<typeof vi.fn>;
     recordPersonalTrainingPayment: ReturnType<typeof vi.fn>;
+  };
+  let managementService: {
+    getSettings: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
@@ -49,11 +53,17 @@ describe('Payments', () => {
       createPayment: vi.fn().mockReturnValue(of({ success: true })),
       recordPersonalTrainingPayment: vi.fn().mockReturnValue(of({ success: true }))
     };
+    managementService = {
+      getSettings: vi.fn().mockReturnValue(of({
+        business: { gstEnabled: false, gstPercentage: 0 }
+      }))
+    };
 
     await TestBed.configureTestingModule({
       imports: [Payments],
       providers: [
         { provide: PaymentService, useValue: paymentService },
+        { provide: ManagementService, useValue: managementService },
         { provide: DashboardService, useValue: { requestRefresh: vi.fn() } }
       ]
     }).compileComponents();
@@ -72,8 +82,54 @@ describe('Payments', () => {
   it('loads eligible members from the backend for the selected category', () => {
     component.openPaymentForm();
     expect(paymentService.getEligibleMembers).toHaveBeenCalledWith('gym-membership');
+    expect(managementService.getSettings).toHaveBeenCalled();
     expect(component.members.map(member => member._id)).toEqual(['member-1']);
     expect(component.members[0].pendingAmount).toBe(60);
+  });
+
+  it('shows saved GST values without repricing a membership after settings change', () => {
+    managementService.getSettings.mockReturnValue(of({
+      business: { gstEnabled: true, gstPercentage: 18 }
+    }));
+    paymentService.getEligibleMembers.mockReturnValue(of({
+      success: true,
+      members: [{
+        _id: 'member-1',
+        fullName: 'Member 1',
+        phone: '5551234',
+        totalFee: 118,
+        alreadyPaid: 0,
+        pendingAmount: 118,
+        memberships: [{
+          _id: 'membership-1',
+          planId: { planName: 'Monthly' },
+          planPrice: 118,
+          paidAmount: 0,
+          pendingAmount: 118,
+          status: 'Active',
+          gstSnapshot: {
+            enabled: true,
+            taxableAmount: 100,
+            gstPercentage: 18,
+            totalTax: 18,
+            totalAmount: 118,
+            taxInclusive: true
+          }
+        }]
+      }]
+    }));
+
+    component.openPaymentForm();
+    component.selectedMemberId = 'member-1';
+    component.onMemberChange();
+    component.selectedMembershipId = 'membership-1';
+    component.onMembershipChange();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Taxable amount: ₹100.00');
+    expect(fixture.nativeElement.textContent).toContain('GST amount: ₹18.00');
+    expect(fixture.nativeElement.textContent).toContain('Final amount including GST: ₹118.00');
+    expect(fixture.nativeElement.textContent).toContain('payment uses the saved membership tax invoice');
   });
 
   it('loads separate PT eligible packages after payment category changes', () => {

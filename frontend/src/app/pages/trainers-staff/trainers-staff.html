@@ -384,9 +384,11 @@
         <h4>Create PT package</h4>
         <div class="form-grid">
           <label>Assigned member *
-            <select name="ptMember" [(ngModel)]="ptPackageForm.memberId" required>
-              <option value="">Select a member assigned to this trainer</option>
-              <option *ngFor="let member of availableMembers" [value]="member._id">{{ member.fullName }} · {{ member.phone }}</option>
+            <select name="ptMember" [(ngModel)]="ptPackageForm.memberId" [disabled]="ptAssignedMembersLoading || !!ptAssignedMembersError || !ptAssignedMembers.length" required>
+              <option value="">{{ ptAssignedMembersLoading ? 'Loading assigned members…' : 'Select a member assigned to this trainer' }}</option>
+              <option *ngFor="let member of ptAssignedMembers" [value]="member._id">
+                {{ member.fullName }} · ID {{ member.memberId }}<ng-container *ngIf="member.phone"> · {{ member.phone }}</ng-container>
+              </option>
             </select>
           </label>
           <label>Package name *<input name="ptPackageName" [(ngModel)]="ptPackageForm.packageName" maxlength="120" required></label>
@@ -406,6 +408,14 @@
           </label>
         </div>
         <button class="primary-btn" [disabled]="ptSaving">{{ ptSaving ? 'Saving…' : 'Create PT package' }}</button>
+        <p *ngIf="ptAssignedMembersLoading" class="loading-message" role="status">Loading members assigned to this trainer…</p>
+        <p *ngIf="!ptAssignedMembersLoading && !ptAssignedMembersError && !ptAssignedMembers.length" class="empty" role="status">
+          No members are currently assigned to this trainer.
+        </p>
+        <div *ngIf="ptAssignedMembersError" class="error-message" role="alert">
+          <span>{{ ptAssignedMembersError }}</span>
+          <button type="button" class="secondary-btn" (click)="retryPTAssignedMembers()">Retry</button>
+        </div>
       </form>
 
       <p *ngIf="ptPackagesLoading" class="loading-message">Loading PT packages…</p>

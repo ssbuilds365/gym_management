@@ -172,6 +172,14 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   ptTrainer: TeamRecord | null = null;
   ptPackages: TrainerPTPackageRow[] = [];
   ptPackagesLoading = false;
+  ptAssignedMembers: Array<{
+    _id: string;
+    fullName: string;
+    phone: string;
+    memberId: string;
+  }> = [];
+  ptAssignedMembersLoading = false;
+  ptAssignedMembersError = '';
   ptSaving = false;
   ptError = '';
   ptSuccess = '';
@@ -211,6 +219,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   private staffRequest?: Subscription;
   private financialRequest?: Subscription;
   private ptPackageRequest?: Subscription;
+  private ptAssignedMembersRequest?: Subscription;
   private trainerSearchTimer?: ReturnType<typeof setTimeout>;
   private staffSearchTimer?: ReturnType<typeof setTimeout>;
   private pendingDirectoryRequests = 0;
@@ -240,6 +249,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     this.staffRequest?.unsubscribe();
     this.financialRequest?.unsubscribe();
     this.ptPackageRequest?.unsubscribe();
+    this.ptAssignedMembersRequest?.unsubscribe();
   }
 
   private emptyForm(): TeamForm {
@@ -806,10 +816,55 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   openPTPackages(trainer: TeamRecord): void {
     this.ptTrainer = trainer;
     this.ptPackages = [];
+    this.ptAssignedMembers = [];
     this.ptPackageForm = this.emptyPTPackageForm();
     this.ptError = '';
+    this.ptAssignedMembersError = '';
     this.ptSuccess = '';
+    this.loadPTAssignedMembers(trainer._id);
     this.loadPTPackages();
+  }
+
+  private loadPTAssignedMembers(trainerId: string): void {
+    this.ptAssignedMembersRequest?.unsubscribe();
+    this.ptAssignedMembersLoading = true;
+    this.ptAssignedMembersError = '';
+    this.ptAssignedMembersRequest = this.management.getTrainerAssignments(trainerId)
+      .pipe(finalize(() => {
+        this.ptAssignedMembersLoading = false;
+        this.changeDetector.markForCheck();
+      }))
+      .subscribe({
+        next: response => {
+          if (this.ptTrainer?._id !== trainerId) return;
+          if (!Array.isArray(response?.members)) {
+            this.ptAssignedMembers = [];
+            this.ptAssignedMembersError = 'Unable to load members assigned to this trainer.';
+            return;
+          }
+          this.ptAssignedMembers = response.members.map((member: {
+            _id: string;
+            fullName: string;
+            phone?: string;
+            memberId?: string;
+          }) => ({
+            _id: member._id,
+            fullName: member.fullName,
+            phone: member.phone || '',
+            memberId: member.memberId || member._id.slice(-6).toUpperCase()
+          }));
+        },
+        error: error => {
+          console.error('PT assigned member loading error:', error);
+          this.ptAssignedMembers = [];
+          this.ptAssignedMembersError =
+            error.error?.message || 'Unable to load members assigned to this trainer.';
+        }
+      });
+  }
+
+  retryPTAssignedMembers(): void {
+    if (this.ptTrainer) this.loadPTAssignedMembers(this.ptTrainer._id);
   }
 
   loadPTPackages(): void {
@@ -938,9 +993,11 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   closePTPackages(): void {
     this.ptTrainer = null;
     this.ptPackages = [];
+    this.ptAssignedMembers = [];
     this.ptPaymentPackageId = '';
     this.ptRefundPaymentId = '';
     this.ptPackageRequest?.unsubscribe();
+    this.ptAssignedMembersRequest?.unsubscribe();
   }
 
   setReportPeriod(period: string): void {

@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const TrainerPTPackage = require('../models/TrainerPTPackage');
 const TrainerPTPayment = require('../models/TrainerPTPayment');
+const Member = require('../models/Member');
+const TrainerStaff = require('../models/TrainerStaff');
+const TrainerAssignment = require('../models/TrainerAssignment');
 const {
   createTrainerPTPackage,
   recordTrainerPTPayment,
@@ -32,6 +35,131 @@ test('PT package creation validates IDs and fee fields before database access', 
 
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /trainer and member IDs/i);
+});
+
+test('PT package creation rejects members not assigned to the requested trainer', async t => {
+  const trainerId = '507f1f77bcf86cd799439011';
+  const memberId = '507f1f77bcf86cd799439012';
+  t.mock.method(TrainerStaff, 'findOne', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => ({ _id: trainerId })
+  }));
+  t.mock.method(Member, 'findOne', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => ({
+      _id: memberId,
+      assignedTrainerId: null,
+      additionalTrainerIds: []
+    })
+  }));
+  t.mock.method(TrainerAssignment, 'findOne', () => ({
+    sort() {
+      return this;
+    },
+    lean: async () => null
+  }));
+  const createPackage = t.mock.method(TrainerPTPackage, 'create', async () => {
+    throw new Error('Package creation must not be reached');
+  });
+
+  const res = response();
+  await createTrainerPTPackage({
+    params: { id: trainerId },
+    tenantId: 'authenticated-tenant',
+    owner: {
+      businessId: 'authenticated-business',
+      _id: '507f1f77bcf86cd799439013'
+    },
+    body: {
+      memberId,
+      packageName: 'PT Package',
+      packageType: 'Monthly',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      totalFee: 500,
+      paymentFrequency: 'Monthly'
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 409);
+  assert.match(res.body.message, /assign this member to the trainer/i);
+  assert.equal(createPackage.mock.calls.length, 0);
+});
+
+test('PT package creation persists the verified member, trainer, and business IDs', async t => {
+  const trainerId = '507f1f77bcf86cd799439011';
+  const memberId = '507f1f77bcf86cd799439012';
+  const businessId = '507f1f77bcf86cd799439013';
+  const assignmentId = '507f1f77bcf86cd799439014';
+  const trainer = { _id: trainerId };
+  const member = {
+    _id: memberId,
+    assignedTrainerId: null,
+    additionalTrainerIds: []
+  };
+  const assignment = { _id: assignmentId };
+  let savedPackage;
+  t.mock.method(TrainerStaff, 'findOne', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => trainer
+  }));
+  t.mock.method(Member, 'findOne', () => ({
+    select() {
+      return this;
+    },
+    lean: async () => member
+  }));
+  t.mock.method(TrainerAssignment, 'findOne', () => ({
+    sort() {
+      return this;
+    },
+    lean: async () => assignment
+  }));
+  t.mock.method(TrainerPTPackage, 'create', async fields => {
+    savedPackage = {
+      ...fields,
+      _id: '507f1f77bcf86cd799439015',
+      totalFeeMinor: fields.totalFeeMinor,
+      toObject() {
+        return { ...this };
+      }
+    };
+    return savedPackage;
+  });
+  t.mock.method(TrainerPTPayment, 'find', () => ({
+    sort() {
+      return this;
+    },
+    lean: async () => []
+  }));
+
+  const res = response();
+  await createTrainerPTPackage({
+    params: { id: trainerId },
+    tenantId: 'authenticated-tenant',
+    owner: { businessId, _id: '507f1f77bcf86cd799439016' },
+    body: {
+      memberId,
+      packageName: 'PT Package',
+      packageType: 'Monthly',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      totalFee: 500,
+      paymentFrequency: 'Monthly'
+    }
+  }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(String(savedPackage.memberId), memberId);
+  assert.equal(String(savedPackage.trainerId), trainerId);
+  assert.equal(String(savedPackage.businessId), businessId);
+  assert.equal(String(savedPackage.assignmentId), assignmentId);
 });
 
 test('PT payment rejects zero, invalid, and unsupported payment methods', async () => {
