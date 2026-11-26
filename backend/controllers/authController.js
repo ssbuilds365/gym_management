@@ -675,17 +675,16 @@ exports.forgotPassword = async (req, res) => {
       message: GENERIC_FORGOT_PASSWORD_MESSAGE
     });
   } catch (error) {
-    console.error('Password reset request failed:', error.code || 'INTERNAL_ERROR');
-    const configurationError = [
+    const safeErrorCode = [
       'SMTP_NOT_CONFIGURED',
       'RESET_URL_MUST_USE_HTTPS',
-      'RESET_URL_INVALID'
-    ].includes(error.code);
-    return res.status(configurationError ? 503 : 502).json({
-      success: false,
-      message: configurationError
-        ? 'Password reset is not configured securely. Please contact support.'
-        : 'We could not send the reset email. Please try again later.'
+      'RESET_URL_INVALID',
+      'PASSWORD_RESET_EMAIL_DELIVERY_FAILED'
+    ].includes(error.code) ? error.code : 'REQUEST_FAILED';
+    console.error('Password reset request could not be completed:', safeErrorCode);
+    return res.status(200).json({
+      success: true,
+      message: GENERIC_FORGOT_PASSWORD_MESSAGE
     });
   }
 };

@@ -2,7 +2,14 @@ const nodemailer = require('nodemailer');
 const config = require('../config/env');
 
 const isSmtpConfigured = smtp =>
-  Boolean(smtp.host && smtp.port && smtp.user && smtp.pass && smtp.from);
+  Boolean(
+    smtp &&
+    typeof smtp.host === 'string' && smtp.host.trim() &&
+    [465, 587].includes(smtp.port) &&
+    typeof smtp.user === 'string' && smtp.user.trim() &&
+    typeof smtp.pass === 'string' && smtp.pass &&
+    typeof smtp.from === 'string' && smtp.from.trim()
+  );
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({
   '&': '&amp;',
@@ -63,6 +70,8 @@ const sendPasswordResetEmail = async ({
     host: smtp.host,
     port: smtp.port,
     secure: smtp.port === 465,
+    requireTLS: smtp.port === 587,
+    tls: { minVersion: 'TLSv1.2' },
     auth: { user: smtp.user, pass: smtp.pass }
   });
   const message = createPasswordResetEmail({ resetUrl, ownerName });

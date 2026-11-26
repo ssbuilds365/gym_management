@@ -302,7 +302,39 @@ test('reset email is branded and SMTP credentials remain transport-only', async 
     }
   });
   assert.equal(transportConfig.secure, true);
+  assert.equal(transportConfig.requireTLS, false);
+  assert.equal(transportConfig.tls.minVersion, 'TLSv1.2');
   assert.deepEqual(transportConfig.auth, { user: smtp.user, pass: smtp.pass });
   assert.equal(sentMessage.to, 'owner@example.test');
   assert.equal(sentMessage.from, smtp.from);
+
+  await sendPasswordResetEmail({
+    email: 'owner@example.test',
+    ownerName: 'Owner',
+    resetUrl: 'https://gym.example.test/reset-password?token=secret',
+    smtp,
+    createTransport: settings => {
+      transportConfig = settings;
+      return { sendMail: async () => {} };
+    }
+  });
+  assert.equal(transportConfig.secure, false);
+  assert.equal(transportConfig.requireTLS, true);
+  assert.equal(transportConfig.tls.minVersion, 'TLSv1.2');
+});
+
+test('SMTP is unavailable unless credentials are complete and TLS-capable ports are selected', async () => {
+  await assert.rejects(sendPasswordResetEmail({
+    email: 'owner@example.test',
+    resetUrl: 'https://gym.example.test/reset-password?token=secret',
+    smtp: { ...smtp, port: 25 },
+    createTransport: () => { throw new Error('transport must not be created'); }
+  }), error => error.code === 'SMTP_NOT_CONFIGURED');
+
+  await assert.rejects(sendPasswordResetEmail({
+    email: 'owner@example.test',
+    resetUrl: 'https://gym.example.test/reset-password?token=secret',
+    smtp: { ...smtp, pass: '' },
+    createTransport: () => { throw new Error('transport must not be created'); }
+  }), error => error.code === 'SMTP_NOT_CONFIGURED');
 });
