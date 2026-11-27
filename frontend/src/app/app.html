@@ -187,6 +187,119 @@
         </ng-template>
       </div>
 
+      <section class="attendance-report-panel panel" aria-labelledby="attendance-report-heading" *ngIf="!dashboardError">
+        <div class="attendance-report-header">
+          <div>
+            <span class="eyebrow">MONTHLY ATTENDANCE</span>
+            <h2 id="attendance-report-heading">Attendance Search &amp; Monthly Report</h2>
+            <p>Search a person and review attendance for a selected month.</p>
+          </div>
+        </div>
+
+        <div class="attendance-search-row">
+          <select [(ngModel)]="attendanceSearchType" aria-label="Person type">
+            <option value="Member">Member</option>
+            <option value="Staff">Staff</option>
+            <option value="Trainer">Trainer</option>
+          </select>
+          <input [(ngModel)]="attendanceSearchQuery"
+            [placeholder]="attendanceSearchType === 'Trainer' ? 'Trainer ID or contact number' : (attendanceSearchType === 'Staff' ? 'Staff ID or contact number' : 'Member ID or contact number')"
+            (keyup.enter)="searchAttendancePerson()"
+            aria-label="Person ID or contact number">
+          <button type="button" class="primary-btn" (click)="searchAttendancePerson()" [disabled]="attendanceSearchLoading">
+            {{ attendanceSearchLoading ? 'Searching…' : 'Search' }}
+          </button>
+        </div>
+        <p class="attendance-report-error" *ngIf="attendanceSearchError" role="alert">{{ attendanceSearchError }}</p>
+        <p class="attendance-report-error" *ngIf="attendanceReportError" role="alert">{{ attendanceReportError }}</p>
+
+        <div class="attendance-person-card" *ngIf="attendanceSelectedPerson">
+          <div>
+            <strong>{{ attendanceSelectedPerson.name }}</strong>
+            <span>{{ attendanceSelectedPerson.type }} · {{ attendanceSelectedPerson.publicId }}</span>
+          </div>
+          <span>{{ attendanceSelectedPerson.contactNumber }}</span>
+        </div>
+
+        <div class="attendance-month-controls" *ngIf="attendanceSelectedPerson">
+          <button type="button" class="secondary-btn" (click)="changeAttendanceMonth(-1)">‹ Previous</button>
+          <select [(ngModel)]="attendanceReportMonth" (ngModelChange)="loadAttendanceReport()" aria-label="Month">
+            <option [ngValue]="1">January</option><option [ngValue]="2">February</option>
+            <option [ngValue]="3">March</option><option [ngValue]="4">April</option>
+            <option [ngValue]="5">May</option><option [ngValue]="6">June</option>
+            <option [ngValue]="7">July</option><option [ngValue]="8">August</option>
+            <option [ngValue]="9">September</option><option [ngValue]="10">October</option>
+            <option [ngValue]="11">November</option><option [ngValue]="12">December</option>
+          </select>
+          <select [(ngModel)]="attendanceReportYear" (ngModelChange)="loadAttendanceReport()" aria-label="Year">
+            <option [ngValue]="attendanceReportYear - 2">{{ attendanceReportYear - 2 }}</option>
+            <option [ngValue]="attendanceReportYear - 1">{{ attendanceReportYear - 1 }}</option>
+            <option [ngValue]="attendanceReportYear">{{ attendanceReportYear }}</option>
+            <option [ngValue]="attendanceReportYear + 1">{{ attendanceReportYear + 1 }}</option>
+          </select>
+          <button type="button" class="secondary-btn" (click)="setCurrentAttendanceMonth()">Current month</button>
+          <button type="button" class="secondary-btn" (click)="changeAttendanceMonth(1)">Next ›</button>
+        </div>
+
+        <p class="attendance-report-loading" *ngIf="attendanceReportLoading">Loading monthly attendance…</p>
+
+        <ng-container *ngIf="attendanceReport && !attendanceReportLoading">
+          <div class="attendance-summary-grid">
+            <article><span>Present Days</span><strong>{{ attendanceReport.summary.presentDays }}</strong></article>
+            <article><span>Absent Days</span><strong>{{ attendanceReport.summary.absentDays }}</strong></article>
+            <article><span>Total Working Days</span><strong>{{ attendanceReport.summary.totalWorkingDays }}</strong></article>
+            <article><span>Attendance %</span><strong>{{ attendanceReport.summary.attendancePercentage }}%</strong></article>
+            <article><span>Total Working Hours</span><strong>{{ attendanceReport.summary.totalWorkingHours ?? 'Unavailable' }}</strong></article>
+          </div>
+
+          <p class="attendance-formula"><strong>Calculation:</strong> {{ attendanceReport.formula }}</p>
+          <p class="attendance-config-note" *ngIf="attendanceReport.missingConfiguration">{{ attendanceReport.missingConfiguration }}</p>
+
+          <div class="attendance-calendar">
+            <div class="attendance-calendar-weekdays" aria-hidden="true">
+              <span *ngFor="let weekday of attendanceWeekdays">{{ weekday }}</span>
+            </div>
+            <div class="attendance-calendar-grid">
+              <button type="button"
+                *ngFor="let day of getAttendanceCalendarCells()"
+                [class.attendance-calendar-empty]="!day"
+                [disabled]="!day"
+                class="attendance-calendar-day"
+                [ngClass]="day ? getAttendanceStatusClass(day.status) : ''"
+                (click)="day && selectAttendanceDate(day)">
+                <ng-container *ngIf="day">
+                  <span class="calendar-date">{{ day.date.slice(-2) }}</span>
+                  <span class="calendar-status">{{ day.status === 'Present' ? 'P' : (day.status === 'Absent' ? 'A' : day.status === 'Half Day' ? '½' : day.status === 'Approved Leave' ? 'L' : day.status === 'Not Scheduled/Future' ? '—' : '•') }}</span>
+                </ng-container>
+              </button>
+            </div>
+          </div>
+
+          <div class="attendance-day-details" *ngIf="attendanceSelectedDate">
+            <h3>Selected Date Details</h3>
+            <dl>
+              <div><dt>Date</dt><dd>{{ attendanceSelectedDate.date }}</dd></div>
+              <div><dt>Attendance Status</dt><dd>{{ attendanceSelectedDate.status }}</dd></div>
+              <div><dt>Check-in</dt><dd>{{ attendanceSelectedDate.checkIn ? (attendanceSelectedDate.checkIn | date:'medium') : 'Not recorded' }}</dd></div>
+              <div><dt>Check-out</dt><dd>{{ attendanceSelectedDate.checkOut ? (attendanceSelectedDate.checkOut | date:'medium') : 'Not recorded' }}</dd></div>
+              <div><dt>Late Duration</dt><dd>{{ attendanceSelectedDate.lateDuration || 0 }} min</dd></div>
+              <div><dt>Working Hours</dt><dd>{{ attendanceSelectedDate.workingMinutes ? ((attendanceSelectedDate.workingMinutes / 60) | number:'1.2-2') : 'Unavailable' }}</dd></div>
+              <div><dt>Leave Information</dt><dd>{{ attendanceSelectedDate.leaveInformation || 'None recorded' }}</dd></div>
+              <div><dt>Attendance Source</dt><dd>{{ attendanceSelectedDate.attendanceSource || 'Not recorded' }}</dd></div>
+            </dl>
+          </div>
+
+          <details class="attendance-download-menu">
+            <summary class="secondary-btn">Download Report ▾</summary>
+            <div>
+              <button type="button" (click)="downloadAttendanceReport('pdf')" [disabled]="attendanceExportLoading">PDF</button>
+              <button type="button" (click)="downloadAttendanceReport('xlsx')" [disabled]="attendanceExportLoading">Excel (.xlsx)</button>
+              <button type="button" (click)="downloadAttendanceReport('csv')" [disabled]="attendanceExportLoading">CSV</button>
+            </div>
+          </details>
+        </ng-container>
+      </section>
+
       <section class="birthday-panel panel" aria-labelledby="birthdays-heading" *ngIf="!dashboardError">
         <div class="birthday-heading">
           <div class="birthday-icon" aria-hidden="true">🎂</div>

@@ -66,6 +66,22 @@ export class AuthService {
     return this.http.put<any>(`${this.apiUrl}/change-password`, data);
   }
 
+  changeEmail(data: {
+    newEmail: string;
+    currentPassword: string;
+  }): Observable<any> {
+    return this.http.put<any>(`${this.apiUrl}/change-email`, data).pipe(
+      tap(response => {
+        if (response?.success && response?.owner) {
+          const ownerJson = localStorage.getItem('owner');
+          let owner = ownerJson ? JSON.parse(ownerJson) : {};
+          owner = { ...owner, ...response.owner };
+          localStorage.setItem('owner', JSON.stringify(owner));
+        }
+      })
+    );
+  }
+
   forgotPassword(email: string): Observable<any> {
     return this.http.post<any>(`${this.apiUrl}/forgot-password`, { email });
   }

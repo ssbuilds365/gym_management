@@ -6,7 +6,10 @@ const {
   checkOut,
   getDailyAttendance,
   getMemberAttendance,
-  checkInWithQR
+  checkInWithQR,
+  searchAttendancePerson,
+  getMonthlyAttendanceReport,
+  downloadMonthlyAttendanceReport
 } = require('../controllers/attendanceController');
 
 const { protectOwner } = require('../middleware/authMiddleware');
@@ -22,6 +25,9 @@ router.get('/daily', protectOwner, getDailyAttendance);
 
 // Get member attendance history
 router.get('/member/:memberId', protectOwner, getMemberAttendance);
+router.get('/search-person', protectOwner, searchAttendancePerson);
+router.get('/monthly-report', protectOwner, getMonthlyAttendanceReport);
+router.get('/monthly-report/:format', protectOwner, downloadMonthlyAttendanceReport);
 
 router.post('/qr-check-in', protectOwner, checkInWithQR);
 

@@ -89,7 +89,6 @@
       </div>
     </section>
 
-    <button class="primary-btn" [disabled]="saving || settingsForm.invalid">{{ saving ? 'Saving…' : 'Save settings' }}</button>
   </form>
 
   <section class="settings-panel" *ngIf="!loading" aria-labelledby="biometric-settings-title">
@@ -213,6 +212,43 @@
       </div>
     </form>
 
+    <div class="security-heading email-change-heading">
+      <div>
+        <span class="eyebrow">ACCOUNT EMAIL</span>
+        <h3>Change Email Address</h3>
+        <p>Update the email used to sign in. No verification email or OTP will be sent.</p>
+      </div>
+    </div>
+    <p class="success" *ngIf="emailSuccess" role="status">{{ emailSuccess }}</p>
+    <p class="error" *ngIf="emailError" role="alert">{{ emailError }}</p>
+    <form class="password-form" (ngSubmit)="changeEmail()">
+      <label>
+        Current Email Address
+        <input type="email" [value]="currentAccountEmail" readonly>
+      </label>
+      <label>
+        New Email Address
+        <input type="email" name="newEmail" [(ngModel)]="emailForm.newEmail" autocomplete="email" required>
+      </label>
+      <label>
+        Current Account Password
+        <span class="password-input">
+          <input [type]="showEmailPassword ? 'text' : 'password'" name="emailPassword"
+            [(ngModel)]="emailForm.currentPassword" autocomplete="current-password" required>
+          <button type="button" class="password-visibility" (click)="showEmailPassword = !showEmailPassword"
+            [attr.aria-label]="showEmailPassword ? 'Hide password' : 'Show password'">
+            {{ showEmailPassword ? 'Hide' : 'Show' }}
+          </button>
+        </span>
+      </label>
+      <div class="password-actions">
+        <button type="submit" class="primary-btn" [disabled]="emailChanging">
+          {{ emailChanging ? 'Updating email…' : 'Update Email' }}
+        </button>
+        <button type="button" class="secondary-btn" (click)="cancelEmailChange()" [disabled]="emailChanging">Cancel</button>
+      </div>
+    </form>
+
     <div class="security-heading">
       <div>
         <span class="eyebrow">ACCOUNT PROTECTION</span>
@@ -257,4 +293,9 @@
       </button>
     </div>
   </section>
+  <div class="settings-save-footer" *ngIf="!loading">
+    <button type="button" class="primary-btn" (click)="save()" [disabled]="saving">
+      {{ saving ? 'Saving…' : 'Save Settings' }}
+    </button>
+  </div>
 </section>

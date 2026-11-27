@@ -41,6 +41,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
   members: any[] = [];
   attendanceList: any[] = [];
   checkedInCount = 0;
+  absentCount = 0;
   businessTimeZone = 'Asia/Kolkata';
 
   selectedMemberId = '';
@@ -162,6 +163,9 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
 
   // Load Daily Attendance
   loadDailyAttendance(): void {
+    this.attendanceList = [];
+    this.checkedInCount = 0;
+    this.absentCount = 0;
     this.loadingAttendance = true;
     this.attendanceLoaded = false;
     this.errorMessage = '';
@@ -179,6 +183,7 @@ export class Attendance implements OnInit, OnDestroy, OnChanges {
           this.checkedInCount = this.attendanceList.filter(
             attendance => !attendance.checkOut
           ).length;
+          this.absentCount = Number(response.totalAbsent || 0);
           this.attendanceLoaded = true;
           this.lastLoadedAt = Date.now();
         },

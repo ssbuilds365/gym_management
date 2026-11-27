@@ -1,11 +1,14 @@
 
 import { ChangeDetectorRef, Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { filter, finalize, Subscription } from 'rxjs';
+import { jsPDF } from 'jspdf';
 
 import { AuthService } from './services/auth';
 import { DashboardService } from './services/dashboard';
+import { AttendanceService } from './services/attendance';
 
 import { Members } from './pages/members/members';
 import { MembershipPlans } from './pages/membership-plans/membership-plans';
@@ -31,6 +34,7 @@ export const isAttendanceKioskUrl = (url: string): boolean =>
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     RouterOutlet,
     Members,
     MembershipPlans,
@@ -83,6 +87,19 @@ export class App implements OnInit, OnDestroy {
   dashboardError = '';
   todayAttendance = 0;
   dashboardTimeZone = 'Asia/Kolkata';
+  attendanceSearchType: 'Member' | 'Staff' | 'Trainer' = 'Member';
+  attendanceSearchQuery = '';
+  attendanceSearchLoading = false;
+  attendanceSearchError = '';
+  attendanceSelectedPerson: any = null;
+  attendanceReportMonth = new Date().getMonth() + 1;
+  attendanceReportYear = new Date().getFullYear();
+  attendanceReportLoading = false;
+  attendanceReportError = '';
+  attendanceReport: any = null;
+  attendanceSelectedDate: any = null;
+  attendanceExportLoading = false;
+  readonly attendanceWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   collections: {
     today: number;
     week: number;
@@ -145,6 +162,7 @@ export class App implements OnInit, OnDestroy {
     private router: Router,
     private authService: AuthService,
     private dashboardService: DashboardService,
+    private attendanceService: AttendanceService,
     private changeDetector: ChangeDetectorRef,
     private sessionActivity: SessionActivityService
   ) {}
@@ -640,6 +658,419 @@ Stay Fit. Stay Strong. ❤️
     return this.maxMonthlyRevenue > 0
       ? (revenue / this.maxMonthlyRevenue) * 100
       : 0;
+  }
+
+  searchAttendancePerson(): void {
+    const query = this.attendanceSearchQuery.trim();
+    if (!query) {
+      this.attendanceSearchError = 'Enter a member, staff or trainer ID or contact number.';
+      return;
+    }
+    this.attendanceSearchLoading = true;
+    this.attendanceSearchError = '';
+    this.attendanceSelectedPerson = null;
+    this.attendanceReport = null;
+    this.attendanceSelectedDate = null;
+    this.attendanceService.searchPerson(this.attendanceSearchType, query).subscribe({
+      next: response => {
+        this.attendanceSearchLoading = false;
+        if (!response?.success) {
+          this.attendanceSearchError = 'No matching person found.';
+          return;
+        }
+        this.attendanceSelectedPerson = response.person;
+        this.loadAttendanceReport();
+      },
+      error: error => {
+        this.attendanceSearchLoading = false;
+        this.attendanceSearchError = error.error?.message || 'Unable to search person.';
+        this.changeDetector.markForCheck();
+      }
+    });
+  }
+
+  loadAttendanceReport(): void {
+    if (!this.attendanceSelectedPerson) return;
+    this.attendanceReportLoading = true;
+    this.attendanceReportError = '';
+    this.attendanceSelectedDate = null;
+    this.attendanceService.getMonthlyReport(
+      this.attendanceSearchType,
+      this.attendanceSelectedPerson.id,
+      this.attendanceReportMonth,
+      this.attendanceReportYear
+    ).subscribe({
+      next: response => {
+        this.attendanceReportLoading = false;
+        this.attendanceReport = response;
+        this.changeDetector.markForCheck();
+      },
+      error: error => {
+        this.attendanceReportLoading = false;
+        this.attendanceReportError = error.error?.message || 'Unable to load attendance report.';
+        this.changeDetector.markForCheck();
+      }
+    });
+  }
+
+  changeAttendanceMonth(offset: number): void {
+    const date = new Date(this.attendanceReportYear, this.attendanceReportMonth - 1 + offset, 1);
+    this.attendanceReportMonth = date.getMonth() + 1;
+    this.attendanceReportYear = date.getFullYear();
+    this.loadAttendanceReport();
+  }
+
+  setCurrentAttendanceMonth(): void {
+    const now = new Date();
+    this.attendanceReportMonth = now.getMonth() + 1;
+    this.attendanceReportYear = now.getFullYear();
+    this.loadAttendanceReport();
+  }
+
+  selectAttendanceDate(row: any): void {
+    this.attendanceSelectedDate = row;
+  }
+
+  getAttendanceMonthDays(): any[] {
+    if (!this.attendanceReport) return [];
+    return this.attendanceReport.daily || [];
+  }
+
+  getAttendanceCalendarCells(): Array<any | null> {
+    const days = this.getAttendanceMonthDays();
+    if (!days.length) return [];
+    const year = this.attendanceReportYear;
+    const month = this.attendanceReportMonth;
+    const firstWeekday = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+    const cells: Array<any | null> = Array(firstWeekday).fill(null);
+    cells.push(...days);
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }
+
+  getAttendanceStatusClass(status: string): string {
+    switch (status) {
+      case 'Present': return 'status-present';
+      case 'Absent': return 'status-absent';
+      case 'Approved Leave': return 'status-leave';
+      case 'Half Day': return 'status-half';
+      case 'Weekly Off': return 'status-weekly';
+      case 'Public Holiday': return 'status-holiday';
+      default: return 'status-future';
+    }
+  }
+
+  private async generatePremiumAttendancePdf(): Promise<void> {
+    if (!this.attendanceReport || !this.attendanceSelectedPerson) return;
+    const report = this.attendanceReport;
+    const summary = report.summary;
+    const person = report.person;
+    const gym = report.gymDetails || {};
+    const monthName = new Intl.DateTimeFormat('en-IN', { month: 'long' })
+      .format(new Date(report.year, report.month - 1, 1));
+    const generatedAt = new Date();
+    const generatedLabel = generatedAt.toLocaleString('en-IN');
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 14;
+    const red: [number, number, number] = [227, 57, 53];
+    const dark: [number, number, number] = [35, 38, 51];
+    const muted: [number, number, number] = [112, 117, 130];
+    const light: [number, number, number] = [246, 247, 249];
+
+    pdf.setFillColor(...red);
+    pdf.rect(0, 0, pageWidth, 24, 'F');
+
+    let logoAdded = false;
+    if (gym.logoUrl) {
+      try {
+        const response = await fetch(gym.logoUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          const reader = new FileReader();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('Logo could not be read'));
+            reader.readAsDataURL(blob);
+          });
+          pdf.addImage(dataUrl, 'AUTO', margin, 4, 16, 16);
+          logoAdded = true;
+        }
+      } catch {
+        logoAdded = false;
+      }
+    }
+
+    const brandX = logoAdded ? margin + 20 : margin;
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(13);
+    pdf.text('SS FITNESS', brandX, 11);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('MANAGER PRO', brandX, 16);
+    pdf.setFontSize(15);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('MONTHLY ATTENDANCE REPORT', pageWidth - margin, 12, { align: 'right' });
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`${monthName} ${report.year}`, pageWidth - margin, 18, { align: 'right' });
+
+    let y = 31;
+    pdf.setTextColor(...dark);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    pdf.text('PERSON DETAILS', margin, y);
+    pdf.text('GYM DETAILS', 116, y);
+    y += 5;
+    pdf.setDrawColor(220, 222, 228);
+    pdf.setFillColor(255, 255, 255);
+    pdf.roundedRect(margin, y, 88, 34, 2, 2, 'FD');
+    pdf.roundedRect(116, y, pageWidth - margin - 116, 34, 2, 2, 'FD');
+
+    pdf.setTextColor(...dark);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'bold');
+    const personNameLines = pdf.splitTextToSize(person.name || 'Person', 82);
+    pdf.text(personNameLines.slice(0, 2), margin + 4, y + 8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(...muted);
+    let personDetailY = y + 16;
+    pdf.text(`${person.type} · ${person.publicId || 'ID unavailable'}`, margin + 4, personDetailY);
+    personDetailY += 5;
+    if (person.contactNumber) {
+      pdf.text(`Contact: ${person.contactNumber}`, margin + 4, personDetailY);
+      personDetailY += 5;
+    }
+    if (person.designation) {
+      pdf.text(`Designation: ${person.designation}`, margin + 4, personDetailY);
+    } else if (person.specialization) {
+      pdf.text(`Specialization: ${person.specialization}`, margin + 4, personDetailY);
+    }
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(...dark);
+    pdf.setFontSize(9);
+    const gymNameLines = pdf.splitTextToSize(report.businessName || 'SS Fitness Manager', 70);
+    pdf.text(gymNameLines.slice(0, 2), 120, y + 8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(...muted);
+    let gymDetailY = y + 16;
+    if (gym.address) {
+      const addressLines = pdf.splitTextToSize(`Address: ${gym.address}`, 72);
+      pdf.text(addressLines.slice(0, 2), 120, gymDetailY);
+      gymDetailY += addressLines.length > 1 ? 9 : 5;
+    }
+    if (gym.phone) {
+      pdf.text(`Phone: ${gym.phone}`, 120, gymDetailY);
+      gymDetailY += 5;
+    }
+    if (gym.email) pdf.text(`Email: ${gym.email}`, 120, gymDetailY);
+
+    y += 41;
+    pdf.setTextColor(...dark);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    pdf.text('ATTENDANCE SUMMARY', margin, y);
+    y += 5;
+
+    const cards = [
+      ['Present Days', String(summary.presentDays)],
+      ['Absent Days', String(summary.absentDays)],
+      ['Total Working Days', String(summary.totalWorkingDays)],
+      ['Attendance %', `${summary.attendancePercentage}%`],
+      ['Total Working Hours', summary.totalWorkingHours == null ? 'Unavailable' : String(summary.totalWorkingHours)]
+    ];
+    const cardGap = 3;
+    const cardWidth = (pageWidth - margin * 2 - cardGap * 4) / 5;
+    cards.forEach((card, index) => {
+      const x = margin + index * (cardWidth + cardGap);
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(225, 227, 232);
+      pdf.roundedRect(x, y, cardWidth, 21, 2, 2, 'FD');
+      pdf.setFillColor(...red);
+      pdf.rect(x, y, 2, 21, 'F');
+      pdf.setTextColor(...muted);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(6.8);
+      const labelLines = pdf.splitTextToSize(card[0], cardWidth - 6);
+      pdf.text(labelLines.slice(0, 2), x + 5, y + 7);
+      pdf.setTextColor(...dark);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(12);
+      pdf.text(card[1], x + 5, y + 16);
+    });
+
+    y += 27;
+    pdf.setTextColor(...dark);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    pdf.text('MONTHLY ATTENDANCE CALENDAR', margin, y);
+    y += 5;
+
+    const calendarX = margin;
+    const calendarWidth = pageWidth - margin * 2;
+    const cellWidth = calendarWidth / 7;
+    const headerHeight = 8;
+    const cellHeight = 13;
+    pdf.setFillColor(35, 38, 51);
+    pdf.rect(calendarX, y, calendarWidth, headerHeight, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7);
+    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach((weekday, index) => {
+      pdf.text(weekday, calendarX + index * cellWidth + cellWidth / 2, y + 5.2, { align: 'center' });
+    });
+    y += headerHeight;
+
+    const cells = this.getAttendanceCalendarCells();
+    cells.forEach((day, index) => {
+      const row = Math.floor(index / 7);
+      const col = index % 7;
+      const x = calendarX + col * cellWidth;
+      const cy = y + row * cellHeight;
+      let fill: [number, number, number] = [248, 248, 250];
+      let textColor: [number, number, number] = [120, 123, 132];
+      if (day) {
+        switch (day.status) {
+          case 'Present': fill = [224, 244, 232]; textColor = [24, 136, 74]; break;
+          case 'Absent': fill = [253, 234, 234]; textColor = [198, 40, 40]; break;
+          case 'Approved Leave': fill = [255, 247, 201]; textColor = [138, 116, 23]; break;
+          case 'Half Day': fill = [255, 240, 223]; textColor = [179, 106, 25]; break;
+          case 'Weekly Off': fill = [231, 240, 255]; textColor = [53, 106, 181]; break;
+          case 'Public Holiday': fill = [242, 234, 253]; textColor = [116, 81, 165]; break;
+          default: fill = [241, 242, 244]; textColor = [141, 145, 155];
+        }
+      }
+      pdf.setFillColor(...fill);
+      pdf.setDrawColor(225, 227, 232);
+      pdf.rect(x, cy, cellWidth, cellHeight, 'FD');
+      if (day) {
+        pdf.setTextColor(...textColor);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(8);
+        pdf.text(day.date.slice(-2), x + 2.5, cy + 4.5);
+        pdf.setFontSize(6);
+        const shortStatus = day.status === 'Present' ? 'Present'
+          : day.status === 'Absent' ? 'Absent'
+          : day.status === 'Approved Leave' ? 'Leave'
+          : day.status === 'Half Day' ? 'Half Day'
+          : day.status === 'Weekly Off' ? 'Off'
+          : day.status === 'Public Holiday' ? 'Holiday'
+          : '—';
+        pdf.text(shortStatus, x + cellWidth - 2, cy + 10.5, { align: 'right' });
+      }
+    });
+    y += Math.ceil(cells.length / 7) * cellHeight + 5;
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.8);
+    pdf.setTextColor(...muted);
+    pdf.text('Legend: ', margin, y);
+    const legend = [
+      ['Present', [224, 244, 232], [24, 136, 74]],
+      ['Absent', [253, 234, 234], [198, 40, 40]],
+      ['Leave', [255, 247, 201], [138, 116, 23]],
+      ['Off', [231, 240, 255], [53, 106, 181]],
+      ['Holiday', [242, 234, 253], [116, 81, 165]]
+    ] as Array<[string, [number, number, number], [number, number, number]]>;
+    let legendX = margin + 14;
+    legend.forEach(item => {
+      pdf.setFillColor(...item[1]);
+      pdf.roundedRect(legendX, y - 3, 3, 3, 0.5, 0.5, 'F');
+      pdf.setTextColor(...item[2]);
+      pdf.text(item[0], legendX + 4, y);
+      legendX += 20;
+    });
+
+    y += 8;
+    pdf.setDrawColor(220, 222, 228);
+    pdf.roundedRect(margin, y, pageWidth - margin * 2, 18, 2, 2, 'D');
+    pdf.setTextColor(...dark);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.text('REPORT DETAILS', margin + 4, y + 5);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7);
+    pdf.setTextColor(...muted);
+    const totalDaysInMonth = new Date(report.year, report.month, 0).getDate();
+    const detailText = `Month: ${monthName} ${report.year}  |  Type: ${person.type}  |  ID: ${person.publicId || 'Unavailable'}  |  Total Days: ${totalDaysInMonth}`;
+    pdf.text(detailText, margin + 4, y + 10);
+    const secondDetail = `Working Days: ${summary.totalWorkingDays}  |  Present: ${summary.presentDays}  |  Absent: ${summary.absentDays}  |  Attendance: ${summary.attendancePercentage}%  |  Working Hours: ${summary.totalWorkingHours ?? 'Unavailable'}`;
+    pdf.text(secondDetail, margin + 4, y + 15);
+
+    y += 23;
+    pdf.setTextColor(...dark);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.text('FORMULA & NOTES', margin, y);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.8);
+    pdf.setTextColor(...muted);
+    const notes = [
+      report.formula,
+      'Attendance is based on recorded attendance data. Existing sources may include Manual, QR and Biometric.',
+      'Working hours are calculated only from valid check-in/check-out records.',
+      'Report generated by SS Fitness Manager Pro.'
+    ];
+    let noteY = y + 5;
+    notes.forEach(note => {
+      const lines = pdf.splitTextToSize(note, pageWidth - margin * 2);
+      pdf.text(lines, margin, noteY);
+      noteY += lines.length * 3.5 + 1;
+    });
+
+    const pageCount = pdf.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      pdf.setPage(page);
+      pdf.setDrawColor(225, 227, 232);
+      pdf.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7);
+      pdf.setTextColor(...muted);
+      pdf.text(`Generated ${generatedLabel}`, margin, pageHeight - 7);
+      pdf.text('SS Fitness Manager Pro', pageWidth - margin, pageHeight - 7, { align: 'right' });
+      pdf.text(`Page ${page} of ${pageCount}`, pageWidth / 2, pageHeight - 7, { align: 'center' });
+    }
+
+    const identifier = (person.publicId || 'person').replace(/[^A-Za-z0-9_-]/g, '_');
+    const personType = person.type || 'Person';
+    pdf.save(`SSFitness_Attendance_${personType}_${identifier}_${monthName}_${report.year}.pdf`);
+  }
+
+  downloadAttendanceReport(format: 'pdf' | 'xlsx' | 'csv'): void {
+    if (!this.attendanceSelectedPerson || this.attendanceExportLoading) return;
+    this.attendanceExportLoading = true;
+    if (format === 'pdf') {
+      this.generatePremiumAttendancePdf();
+      this.attendanceExportLoading = false;
+      return;
+    }
+    this.attendanceService.getMonthlyReportDownload(
+      this.attendanceSearchType,
+      this.attendanceSelectedPerson.id,
+      this.attendanceReportMonth,
+      this.attendanceReportYear,
+      format
+    ).subscribe({
+      next: blob => {
+        this.attendanceExportLoading = false;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `attendance-${this.attendanceSelectedPerson.publicId || 'person'}-${this.attendanceReportYear}-${String(this.attendanceReportMonth).padStart(2, '0')}.${format}`;
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => {
+        this.attendanceExportLoading = false;
+        this.attendanceReportError = 'Unable to download the selected report.';
+        this.changeDetector.markForCheck();
+      }
+    });
   }
 
   formatCurrency(amount: number): string {

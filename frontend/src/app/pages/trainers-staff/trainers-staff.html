@@ -119,7 +119,7 @@
         <thead><tr><th>Trainer</th><th>Phone</th><th>Email</th><th>Specialization</th><th>Members</th><th>Assigned Batches</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           <tr *ngFor="let trainer of trainers">
-            <td>{{ trainer.name }}</td><td>{{ trainer.phone }}</td><td>{{ trainer.email || '—' }}</td>
+            <td><strong>{{ trainer.name }}</strong><br><small>{{ trainer.trainerId || 'ID pending migration' }}</small></td><td>{{ trainer.phone }}</td><td>{{ trainer.email || '—' }}</td>
             <td>{{ trainer.specialization || '—' }}</td>
             <td>
               {{ trainer.assignedMemberCount || 0 }} / {{ trainer.maxClientCapacity || 'No limit' }}
@@ -189,7 +189,7 @@
         <thead><tr><th>Staff Name</th><th>Phone</th><th>Email</th><th>Designation / Department</th><th>Joining Date</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           <tr *ngFor="let person of staff">
-            <td>{{ person.name }}</td><td>{{ person.phone }}</td><td>{{ person.email || '—' }}</td>
+            <td><strong>{{ person.name }}</strong><br><small>{{ person.staffId || '—' }}</small></td><td>{{ person.phone }}</td><td>{{ person.email || '—' }}</td>
             <td>{{ person.designation || '—' }}<span *ngIf="person.department"> · {{ person.department }}</span></td>
             <td>{{ person.joiningDate ? (person.joiningDate | date:'mediumDate') : '—' }}</td>
             <td><span class="status" [class.inactive]="person.status === 'Inactive'">{{ person.status }}</span></td>
@@ -493,6 +493,7 @@
     <section class="dialog-panel detail-dialog" role="dialog" aria-modal="true" aria-label="Team member details" (click)="$event.stopPropagation()">
       <div class="section-heading"><div><span class="eyebrow">{{ selectedRecord.role | uppercase }}</span><h3>{{ selectedRecord.name }}</h3></div><button class="secondary-btn" type="button" (click)="selectedRecord = null">Close</button></div>
       <dl class="detail-grid">
+        <dt>{{ selectedRecord.role === 'Trainer' ? 'Trainer ID' : 'Staff ID' }}</dt><dd>{{ selectedRecord.role === 'Trainer' ? (selectedRecord.trainerId || 'ID pending migration') : (selectedRecord.staffId || '—') }}</dd>
         <dt>Phone</dt><dd>{{ selectedRecord.phone }}</dd><dt>Email</dt><dd>{{ selectedRecord.email || '—' }}</dd>
         <dt>Joining Date</dt><dd>{{ selectedRecord.joiningDate ? (selectedRecord.joiningDate | date:'mediumDate') : '—' }}</dd>
         <dt>Specialization</dt><dd>{{ selectedRecord.specialization || '—' }}</dd>

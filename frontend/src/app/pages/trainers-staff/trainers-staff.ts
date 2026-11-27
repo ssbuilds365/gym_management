@@ -15,6 +15,8 @@ import { ManagementService } from '../../services/management';
 
 interface TeamRecord {
   _id: string;
+  trainerId?: string;
+  staffId?: string;
   name: string;
   phone: string;
   email: string;

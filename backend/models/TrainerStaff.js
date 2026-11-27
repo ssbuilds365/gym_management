@@ -7,6 +7,18 @@ const trainerStaffSchema = new mongoose.Schema(
       ref: 'Business',
       required: true
     },
+    trainerId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: ''
+    },
+    staffId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: ''
+    },
     name: { type: String, required: true, trim: true, maxlength: 120 },
     phone: { type: String, required: true, trim: true, maxlength: 30 },
     email: { type: String, trim: true, lowercase: true, default: '' },
@@ -35,5 +47,13 @@ const trainerStaffSchema = new mongoose.Schema(
 trainerStaffSchema.index({ tenantId: 1, createdAt: -1 });
 trainerStaffSchema.index({ tenantId: 1, status: 1, role: 1 });
 trainerStaffSchema.index({ tenantId: 1, role: 1, joiningDate: -1 });
+trainerStaffSchema.index(
+  { tenantId: 1, trainerId: 1 },
+  { unique: true, partialFilterExpression: { trainerId: { $type: 'string', $gt: '' } } }
+);
+trainerStaffSchema.index(
+  { tenantId: 1, staffId: 1 },
+  { unique: true, partialFilterExpression: { staffId: { $type: 'string', $gt: '' } } }
+);
 
 module.exports = mongoose.model('TrainerStaff', trainerStaffSchema);

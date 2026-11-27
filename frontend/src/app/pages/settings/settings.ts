@@ -65,6 +65,15 @@ export class BusinessSettings implements OnInit, OnDestroy {
   showCurrentPassword = false;
   showNewPassword = false;
   showConfirmPassword = false;
+  showEmailPassword = false;
+  emailChanging = false;
+  emailError = '';
+  emailSuccess = '';
+  currentAccountEmail = '';
+  emailForm = {
+    newEmail: '',
+    currentPassword: ''
+  };
   passwordForm = {
     currentPassword: '',
     newPassword: '',
@@ -107,6 +116,12 @@ export class BusinessSettings implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    try {
+      const owner = JSON.parse(localStorage.getItem('owner') || '{}');
+      this.currentAccountEmail = String(owner.email || '');
+    } catch {
+      this.currentAccountEmail = '';
+    }
     this.load();
     this.loadSessions();
     this.loadKioskCredentials();
@@ -340,6 +355,46 @@ export class BusinessSettings implements OnInit, OnDestroy {
           this.sessionsError = error.error?.message || 'Unable to revoke other sessions.';
         }
       });
+  }
+
+  changeEmail(): void {
+    if (this.emailChanging) return;
+    this.emailError = '';
+    this.emailSuccess = '';
+    const newEmail = this.emailForm.newEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      this.emailError = 'Enter a valid email address.';
+      return;
+    }
+    if (!this.emailForm.currentPassword) {
+      this.emailError = 'Enter your current account password.';
+      return;
+    }
+    this.emailChanging = true;
+    this.auth.changeEmail({
+      newEmail,
+      currentPassword: this.emailForm.currentPassword
+    }).pipe(finalize(() => {
+      this.emailChanging = false;
+      this.changeDetector.markForCheck();
+    })).subscribe({
+      next: response => {
+        this.currentAccountEmail = String(response.owner?.email || newEmail);
+        this.emailForm = { newEmail: '', currentPassword: '' };
+        this.showEmailPassword = false;
+        this.emailSuccess = response.message || 'Email address updated successfully.';
+      },
+      error: error => {
+        this.emailError = error.error?.message || 'Unable to update email address.';
+      }
+    });
+  }
+
+  cancelEmailChange(): void {
+    this.emailForm = { newEmail: '', currentPassword: '' };
+    this.emailError = '';
+    this.emailSuccess = '';
+    this.showEmailPassword = false;
   }
 
   revokeAllSessions(): void {

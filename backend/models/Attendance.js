@@ -17,7 +17,26 @@ const attendanceSchema = new mongoose.Schema(
     memberId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Member',
-      required: true
+      required: false,
+      default: null
+    },
+
+    subjectType: {
+      type: String,
+      enum: ['Member', 'Staff', 'Trainer'],
+      default: 'Member'
+    },
+
+    subjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: 'subjectRef',
+      default: null
+    },
+
+    subjectRef: {
+      type: String,
+      enum: ['Member', 'TrainerStaff'],
+      default: 'Member'
     },
 
     attendanceDate: {
@@ -62,7 +81,7 @@ const attendanceSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['Present', 'Absent', 'Late'],
+      enum: ['Present', 'Absent', 'Late', 'Half Day', 'Leave'],
       default: 'Present'
     },
 
@@ -89,6 +108,13 @@ attendanceSchema.index({
   tenantId: 1,
   memberId: 1,
   attendanceDate: -1,
+  checkIn: -1
+});
+attendanceSchema.index({
+  tenantId: 1,
+  subjectType: 1,
+  subjectId: 1,
+  attendanceDate: 1,
   checkIn: -1
 });
 attendanceSchema.index(

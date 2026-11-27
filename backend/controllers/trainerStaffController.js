@@ -84,6 +84,53 @@ const buildRecord = (body, isCreate) => {
 const validId = id => mongoose.Types.ObjectId.isValid(id);
 exports.validateTrainerStaffRecord = buildRecord;
 
+const normalizePublicPhone = value => String(value || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+
+const nextSequenceId = async (tenantId, role) => {
+  const field = role === 'Trainer' ? 'trainerId' : 'staffId';
+  const prefix = role === 'Trainer' ? 'TRN' : 'STF';
+  const records = await TrainerStaff.find({
+    tenantId,
+    role,
+    [field]: new RegExp(`^${prefix}\\d+$`, 'i')
+  }).select(field).lean();
+  let max = 0;
+  for (const record of records) {
+    const match = String(record[field] || '').match(/(\d+)$/);
+    if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
+  }
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
+};
+
+const ensureRoleId = async (record, role) => {
+  const field = role === 'Trainer' ? 'trainerId' : 'staffId';
+  if (record[field]) return record;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = await nextSequenceId(record.tenantId, role);
+    try {
+      const updated = await TrainerStaff.findOneAndUpdate(
+        { _id: record._id, tenantId: record.tenantId, [field]: '' },
+        { $set: { [field]: candidate } },
+        { returnDocument: 'after', runValidators: true }
+      );
+      if (updated) return updated;
+    } catch (error) {
+      if (error?.code !== 11000) throw error;
+    }
+  }
+  return TrainerStaff.findById(record._id);
+};
+
+exports.ensureTrainerStaffPublicIds = async tenantId => {
+  const missing = await TrainerStaff.find({
+    tenantId,
+    $or: [{ trainerId: { $in: ['', null] } }, { staffId: { $in: ['', null] } }]
+  });
+  for (const record of missing) {
+    await ensureRoleId(record, record.role);
+  }
+};
+
 const assignedCounts = async (tenantId, businessId, trainerIds) => {
   if (!trainerIds.length) return new Map();
   const groups = await Member.aggregate([
@@ -118,6 +165,7 @@ const assignedCounts = async (tenantId, businessId, trainerIds) => {
 exports.listTrainerStaff = async (req, res) => {
   try {
     const tenantId = req.tenantId;
+    await exports.ensureTrainerStaffPublicIds(tenantId);
     const filter = { tenantId };
     if (['Trainer', 'Staff'].includes(req.query.role)) filter.role = req.query.role;
     if (['Active', 'Inactive'].includes(req.query.status)) filter.status = req.query.status;
@@ -128,6 +176,8 @@ exports.listTrainerStaff = async (req, res) => {
         { name: new RegExp(escaped, 'i') },
         { phone: new RegExp(escaped, 'i') },
         { email: new RegExp(escaped, 'i') },
+        { trainerId: new RegExp(`^${escaped}$`, 'i') },
+        { staffId: new RegExp(`^${escaped}$`, 'i') },
         { specialization: new RegExp(escaped, 'i') },
         { designation: new RegExp(escaped, 'i') },
         { department: new RegExp(escaped, 'i') }
@@ -209,7 +259,8 @@ exports.createTrainerStaff = async (req, res) => {
       tenantId: req.tenantId,
       createdBy: req.owner._id
     });
-    return res.status(201).json({ success: true, staff });
+    const withId = await ensureRoleId(staff, data.role);
+    return res.status(201).json({ success: true, staff: withId });
   } catch (error) {
     console.error('Create trainer/staff error:', error);
     return res.status(500).json({ success: false, message: 'Unable to create trainer or staff record' });

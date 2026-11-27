@@ -12,6 +12,7 @@ const {
   revokeOwnerSession,
   revokeOtherOwnerSessions,
   revokeAllOwnerSessions,
+  changeOwnerEmail,
   changeOwnerPassword,
   forgotPassword,
   validatePasswordResetToken,
@@ -70,6 +71,7 @@ router.post('/reset-password', resetPasswordLimiter, resetPassword);
 // Get authenticated Owner + Business Profile
 router.get('/profile', protectOwner, getProfile);
 router.put('/change-password', protectOwner, changePasswordLimiter, changeOwnerPassword);
+router.put('/change-email', protectOwner, changePasswordLimiter, changeOwnerEmail);
 router.post('/activity', protectOwner, recordSessionActivity);
 router.post('/refresh', protectOwner, refreshSession);
 router.post('/logout', logoutSession);

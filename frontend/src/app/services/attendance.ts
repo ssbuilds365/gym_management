@@ -41,6 +41,34 @@ export class AttendanceService {
     return this.http.get(`${this.apiUrl}/member/${memberId}`);
   }
 
+  searchPerson(type: 'Member' | 'Staff' | 'Trainer', query: string): Observable<any> {
+    let params = new HttpParams()
+      .set('type', type)
+      .set('query', query.trim());
+    return this.http.get(`${this.apiUrl}/search-person`, { params });
+  }
+
+  getMonthlyReport(type: 'Member' | 'Staff' | 'Trainer', personId: string, month: number, year: number): Observable<any> {
+    const params = new HttpParams()
+      .set('type', type)
+      .set('personId', personId)
+      .set('month', month)
+      .set('year', year);
+    return this.http.get(`${this.apiUrl}/monthly-report`, { params });
+  }
+
+  getMonthlyReportDownload(type: 'Member' | 'Staff' | 'Trainer', personId: string, month: number, year: number, format: 'pdf' | 'xlsx' | 'csv'): Observable<Blob> {
+    const params = new HttpParams()
+      .set('type', type)
+      .set('personId', personId)
+      .set('month', month)
+      .set('year', year);
+    return this.http.get(`${this.apiUrl}/monthly-report/${format}`, {
+      params,
+      responseType: 'blob'
+    });
+  }
+
   checkInWithQR(qrToken: string): Observable<any> {
   return this.http.post(
     `${this.apiUrl}/qr-check-in`,

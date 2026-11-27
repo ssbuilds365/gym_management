@@ -9,7 +9,8 @@
     "dev": "node --watch server.js",
     "migrate:business-type": "node scripts/migrateDanceAcademyBusinessType.js",
     "migrate:kiosk-idempotency-index": "node scripts/migrateKioskIdempotencyIndex.js",
-    "migrate:biometric-duplicate-index": "node scripts/migrateBiometricDuplicateIndex.js"
+    "migrate:biometric-duplicate-index": "node scripts/migrateBiometricDuplicateIndex.js",
+    "migrate:trainer-staff-ids": "node scripts/migrateTrainerStaffIds.js"
   },
   "keywords": [],
   "author": "",

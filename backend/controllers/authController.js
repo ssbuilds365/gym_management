@@ -602,6 +602,65 @@ exports.revokeAllOwnerSessions = async (req, res) => {
   }
 };
 
+exports.changeOwnerEmail = async (req, res) => {
+  try {
+    const newEmail = typeof req.body?.newEmail === 'string'
+      ? req.body.newEmail.trim().toLowerCase()
+      : '';
+    const currentPassword = typeof req.body?.currentPassword === 'string'
+      ? req.body.currentPassword
+      : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+    }
+    if (!currentPassword) {
+      return res.status(400).json({ success: false, message: 'Current account password is required.' });
+    }
+    const owner = await Owner.findOne({
+      _id: req.owner._id,
+      tenantId: req.tenantId
+    }).select('+password');
+    if (!owner || owner.isActive !== true) {
+      return res.status(401).json({ success: false, message: 'Authenticated account is unavailable.' });
+    }
+    const passwordMatches = await bcrypt.compare(currentPassword, owner.password);
+    if (!passwordMatches) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+    }
+    if (newEmail === owner.email) {
+      return res.status(400).json({ success: false, message: 'Enter a new email address.' });
+    }
+    const duplicate = await Owner.findOne({
+      _id: { $ne: owner._id },
+      email: newEmail
+    }).select('_id').lean();
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: 'This email address is already registered.' });
+    }
+    owner.email = newEmail;
+    await owner.save();
+    return res.status(200).json({
+      success: true,
+      message: 'Email address updated successfully.',
+      owner: {
+        id: owner._id,
+        name: owner.name,
+        email: owner.email,
+        phone: owner.phone,
+        businessId: owner.businessId,
+        tenantId: owner.tenantId,
+        role: owner.role
+      }
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'This email address is already registered.' });
+    }
+    console.error('Change owner email failed:', error.message);
+    return res.status(500).json({ success: false, message: 'Unable to change email address.' });
+  }
+};
+
 exports.changeOwnerPassword = async (req, res) => {
   const { currentPassword, newPassword, confirmPassword } = req.body || {};
   const validationError = validatePasswordChangeInput({
