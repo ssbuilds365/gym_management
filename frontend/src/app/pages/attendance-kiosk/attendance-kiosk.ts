@@ -90,8 +90,11 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   staffEnrollmentSuccess = false;
   staffEnrollmentStage = '';
   staffRegistrationAt = '';
+  teamEnrollmentSubjectType: 'trainer' | 'staff' | '' = '';
+  teamEnrollmentSubjectId = '';
   enrollmentCameraActive = false;
   scanning = false;
+  kioskAction: 'check-in' | 'check-out' = 'check-in';
   modelsLoading = false;
   faceStatus = 'Start Face Scan';
   result: KioskResult | null = null;
@@ -123,6 +126,12 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    const teamEnrollment = String(this.route.snapshot?.queryParamMap?.get?.('teamEnrollment') || '');
+    const subjectId = String(this.route.snapshot?.queryParamMap?.get?.('subjectId') || '');
+    if (teamEnrollment === 'trainer' || teamEnrollment === 'staff') {
+      this.teamEnrollmentSubjectType = teamEnrollment;
+      this.teamEnrollmentSubjectId = subjectId;
+    }
     this.accessDenied = Boolean(this.route.snapshot.paramMap.get('section'));
     this.clockTimer = setInterval(() => {
       this.now = new Date();
@@ -173,6 +182,9 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         this.changeDetector.markForCheck();
         this.startRenewalTimer();
         void this.requestWakeLock();
+        if (this.teamEnrollmentSubjectType && this.teamEnrollmentSubjectId) {
+          this.openStaffRegistration();
+        }
       },
       error: error => {
         this.authError = error.error?.message ||
@@ -564,6 +576,68 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
         totalMs: performance.now() - totalStartedAt
       });
       this.changeDetector.markForCheck();
+    }
+  }
+
+  async startTeamEnrollmentCamera(): Promise<void> {
+    if (!this.teamEnrollmentSubjectType || !this.teamEnrollmentSubjectId ||
+      !this.staffConsent || this.staffEnrollmentLoading) return;
+    this.staffEnrollmentError = '';
+    this.enrollmentCameraActive = true;
+    this.changeDetector.detectChanges();
+    await Promise.resolve();
+    try {
+      if (!this.enrollmentVideoRef) throw new Error('Camera preview could not be rendered.');
+      this.enrollmentOwnsCamera = !this.cameraService.hasActiveStream;
+      if (this.enrollmentOwnsCamera) {
+        await this.cameraService.open(this.enrollmentVideoRef.nativeElement, 'user');
+      } else {
+        await this.cameraService.attach(this.enrollmentVideoRef.nativeElement);
+      }
+    } catch (error) {
+      this.enrollmentCameraActive = false;
+      this.staffEnrollmentError = error instanceof Error
+        ? error.message
+        : 'Unable to start the biometric camera.';
+    }
+  }
+
+  async captureTeamEnrollment(): Promise<void> {
+    if (!this.teamEnrollmentSubjectType || !this.teamEnrollmentSubjectId ||
+      !this.staffConsent || !this.enrollmentCameraActive || this.staffEnrollmentLoading) return;
+    this.staffEnrollmentLoading = true;
+    this.staffEnrollmentError = '';
+    try {
+      if (!this.modelsLoaded) await this.loadFaceModels();
+      const video = this.enrollmentVideoRef?.nativeElement;
+      if (!video) throw new Error('Camera preview is unavailable.');
+      const samples: string[] = [];
+      for (let index = 0; index < 3; index += 1) {
+        const box = await this.faceRecognition.detectSingleFace(video);
+        if (!box) throw new FaceRecognitionError('NO_FACE', 'Hold the face steady inside the guide.');
+        samples.push(this.faceRecognition.captureImage(video));
+        if (index < 2) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+      this.faceRecognition.validateEnrollmentSamples(samples);
+      const subjectRole = this.teamEnrollmentSubjectType;
+      const response = await firstValueFrom(this.http.post<any>(
+        `${environment.apiUrl}/kiosk/team/enrollment/face/${subjectRole}/${this.teamEnrollmentSubjectId}`,
+        {
+          images: samples,
+          consentGranted: true,
+          consentTextVersion: 'kiosk-team-face-consent-v1',
+          replaceExisting: this.staffReplaceExisting
+        },
+        { headers: this.kioskHeaders(), withCredentials: true }
+      ));
+      if (!response?.success) throw new Error(response?.message || 'Face enrollment failed.');
+      this.staffEnrollmentSuccess = true;
+      this.staffEnrollmentStage = 'Face registered successfully.';
+      this.stopEnrollmentCamera();
+    } catch (error: any) {
+      this.staffEnrollmentError = error?.error?.message || error?.message || 'Unable to register biometric face.';
+    } finally {
+      this.staffEnrollmentLoading = false;
     }
   }
 
@@ -999,16 +1073,18 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
     try {
       const response = await this.http.post<any>(
         `${environment.apiUrl}/kiosk/attendance/check-in`,
-        { memberId, idempotencyKey, matchToken },
+        { memberId, idempotencyKey, matchToken, action: this.kioskAction },
         { headers: this.kioskHeaders() }
       ).toPromise();
       this.showResult({
         type: 'success',
-        title: 'CHECK-IN SUCCESSFUL',
-        message: 'Welcome! Your attendance has been recorded.',
-        memberName: response.member?.fullName,
-        memberId: response.member?.id,
-        time: response.checkInTime ? new Date(response.checkInTime).toLocaleTimeString('en-IN') : '',
+        title: response.code === 'CHECK_OUT_SUCCESS' ? 'CHECK-OUT SUCCESSFUL' : 'CHECK-IN SUCCESSFUL',
+        message: response.message || 'Welcome! Your attendance has been recorded.',
+        memberName: response.subject?.name || response.member?.fullName,
+        memberId: response.subject?.publicId || response.member?.id,
+        time: (response.checkInTime || response.checkOutTime)
+          ? new Date(response.checkInTime || response.checkOutTime).toLocaleTimeString('en-IN')
+          : '',
         membershipPlan: response.membership?.planName,
         validUntil: response.membership?.validUntil
           ? new Date(response.membership.validUntil).toLocaleDateString('en-IN')
@@ -1043,6 +1119,21 @@ export class AttendanceKiosk implements OnInit, OnDestroy {
           title: 'MEMBER ACCESS DENIED',
           message: 'This member is inactive or blocked. Please contact gym staff.',
           memberName: error.error.member?.fullName
+        });
+      } else if (code === 'CHECK_OUT_WITHOUT_CHECK_IN') {
+        this.showResult({
+          type: 'error',
+          title: 'NO ACTIVE CHECK-IN',
+          message: error.error.message || 'No open check-in was found.',
+          memberName: error.error.subject?.name
+        });
+      } else if (code === 'ALREADY_CHECKED_IN') {
+        this.showResult({
+          type: 'duplicate',
+          title: 'ATTENDANCE ALREADY MARKED',
+          message: error.error.message || 'The person is already checked in.',
+          memberName: error.error.subject?.name,
+          time: error.error.checkInTime ? new Date(error.error.checkInTime).toLocaleTimeString('en-IN') : ''
         });
       } else {
         this.showResult({

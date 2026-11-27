@@ -145,7 +145,8 @@ export class App implements OnInit, OnDestroy {
         { name: 'Expense Tracker', icon: '₹' },
         { name: 'Enquiry Management', icon: '◎' },
         { name: 'Global Message', icon: '◉' },
-        { name: 'Trainers & Staff', icon: '♟' },
+        { name: 'Trainers', icon: '♟' },
+        { name: 'Staff', icon: '♙' },
         { name: 'Reports & Analytics', icon: '▥' }
       ]
     },

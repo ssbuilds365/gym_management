@@ -9,13 +9,21 @@
   </header>
 
   <div class="summary-grid">
-    <article class="summary-card"><span>Total Trainers</span><strong>{{ trainerTotal }}</strong></article>
-    <article class="summary-card"><span>Active Trainers</span><strong>{{ activeTrainerTotal }}</strong></article>
-    <article class="summary-card"><span>Total Staff</span><strong>{{ staffTotal }}</strong></article>
-    <article class="summary-card"><span>Active Staff</span><strong>{{ activeStaffTotal }}</strong></article>
+    <ng-container *ngIf="roleMode !== 'Staff'">
+      <article class="summary-card"><span>Total Trainers</span><strong>{{ trainerTotal }}</strong></article>
+      <article class="summary-card"><span>Active Trainers</span><strong>{{ activeTrainerTotal }}</strong></article>
+      <article class="summary-card"><span>Inactive Trainers</span><strong>{{ trainerTotal - activeTrainerTotal }}</strong></article>
+      <article class="summary-card"><span>Assigned Members</span><strong>{{ trainersAssignedMemberCount }}</strong></article>
+    </ng-container>
+    <ng-container *ngIf="roleMode !== 'Trainer'">
+      <article class="summary-card"><span>Total Staff</span><strong>{{ staffTotal }}</strong></article>
+      <article class="summary-card"><span>Active Staff</span><strong>{{ activeStaffTotal }}</strong></article>
+      <article class="summary-card"><span>Inactive Staff</span><strong>{{ staffTotal - activeStaffTotal }}</strong></article>
+      <article class="summary-card"><span>Departments</span><strong>{{ staffDepartmentCount }}</strong></article>
+    </ng-container>
   </div>
 
-  <section class="section-panel financial-panel">
+  <section class="section-panel financial-panel" *ngIf="roleMode !== 'Staff'">
     <div class="section-heading">
       <div>
         <span class="eyebrow">ALL-TIME RECORDED VALUES</span>
@@ -71,7 +79,7 @@
   <p class="success-message" *ngIf="successMessage" role="status">{{ successMessage }}</p>
   <p class="error-message" *ngIf="errorMessage" role="alert">{{ errorMessage }}</p>
 
-  <section class="section-panel">
+  <section class="section-panel" *ngIf="roleMode !== 'Staff'">
     <div class="section-heading">
       <div><span class="eyebrow">SECTION 1</span><h3>Trainers Management</h3></div>
       <button class="primary-btn" type="button" (click)="toggleForm('Trainer')">
@@ -146,7 +154,7 @@
     </div>
   </section>
 
-  <section class="section-panel">
+  <section class="section-panel" *ngIf="roleMode !== 'Trainer'">
     <div class="section-heading">
       <div><span class="eyebrow">SECTION 2</span><h3>Staff Management</h3></div>
       <button class="primary-btn" type="button" (click)="toggleForm('Staff')">
@@ -501,7 +509,16 @@
         <dt>Department</dt><dd>{{ selectedRecord.department || '—' }}</dd>
         <dt>Salary / Commission</dt><dd>{{ selectedRecord.salaryAmount == null ? '—' : ((selectedRecord.compensationType || 'Salary') + ' · ' + selectedRecord.salaryAmount) }}</dd>
         <dt>Status</dt><dd>{{ selectedRecord.status }}</dd>
+        <dt>Biometric Status</dt><dd>{{ selectedRecord.faceStatus === 'Registered' ? 'Registered' : (selectedRecord.faceStatus === 'Disabled' ? 'Disabled' : (selectedRecord.faceStatus === 'EnrollmentError' ? 'Enrollment Error' : 'Not Registered')) }}</dd>
       </dl>
+      <div class="form-actions" *ngIf="selectedRecord.status === 'Active'">
+        <button type="button" class="primary-btn" (click)="openTeamBiometricEnrollment(selectedRecord)">
+          {{ selectedRecord.faceStatus === 'Registered' ? 'Re-enroll Biometric' : 'Register Biometric' }}
+        </button>
+        <button type="button" class="secondary-btn" *ngIf="selectedRecord.faceStatus === 'Registered'" (click)="revokeTeamBiometric(selectedRecord)">
+          Disable Biometric
+        </button>
+      </div>
     </section>
   </div>
 </section>

@@ -4,7 +4,22 @@ const biometricCredentialSchema = new mongoose.Schema(
   {
     tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true, index: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true, index: true },
-    memberId: { type: mongoose.Schema.Types.ObjectId, ref: 'Member', required: true },
+    memberId: { type: mongoose.Schema.Types.ObjectId, ref: 'Member', required: false, default: null },
+    subjectType: {
+      type: String,
+      enum: ['Member', 'Trainer', 'Staff'],
+      default: 'Member'
+    },
+    subjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: 'subjectRef',
+      default: null
+    },
+    subjectRef: {
+      type: String,
+      enum: ['Member', 'TrainerStaff'],
+      default: 'Member'
+    },
     biometricType: { type: String, enum: ['Face'], default: 'Face', required: true },
     encryptedTemplate: {
       ciphertext: { type: String, required: true, select: false },
@@ -33,6 +48,10 @@ const biometricCredentialSchema = new mongoose.Schema(
 biometricCredentialSchema.index(
   { tenantId: 1, memberId: 1, biometricType: 1 },
   { unique: true, partialFilterExpression: { registrationStatus: 'Active' } }
+);
+biometricCredentialSchema.index(
+  { tenantId: 1, subjectType: 1, subjectId: 1, biometricType: 1 },
+  { unique: true, partialFilterExpression: { registrationStatus: 'Active', subjectId: { $type: 'objectId' } } }
 );
 biometricCredentialSchema.index({ tenantId: 1, registrationStatus: 1, consentStatus: 1 });
 biometricCredentialSchema.index(

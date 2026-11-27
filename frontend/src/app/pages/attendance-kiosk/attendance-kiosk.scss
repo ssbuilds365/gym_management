@@ -137,6 +137,45 @@
 .welcome h1 { margin: 8px 0 5px; font-size: clamp(28px, 4vw, 46px); letter-spacing: -.03em; }
 .welcome p { margin: 0; color: var(--muted); }
 
+.kiosk-action-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(110px, 150px));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(7, 17, 31, .72);
+}
+
+.kiosk-action-toggle button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.kiosk-action-toggle button.active {
+  background: #e53935;
+  color: #fff;
+}
+
+.team-biometric-enrollment {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.team-biometric-enrollment video {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #050b12;
+}
+
 .actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(220px, 320px));

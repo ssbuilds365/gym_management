@@ -13,7 +13,7 @@ const {
   identifyMemberForEnrollment,
   enrollMemberFace
 } = require('../controllers/kioskController');
-const { registerFace } = require('../controllers/biometricController');
+const { registerFace, registerTeamFace } = require('../controllers/biometricController');
 const { protectKiosk } = require('../middleware/kioskAuthMiddleware');
 const { protectOwner } = require('../middleware/authMiddleware');
 const requireKioskGymOwner = require('../middleware/kioskStaffAuthorization');
@@ -58,6 +58,14 @@ router.post(
   protectOwner,
   requireKioskGymOwner,
   registerFace
+);
+router.post(
+  '/team/enrollment/face/:subjectType/:id',
+  kioskEnrollmentRateLimit,
+  protectKiosk,
+  protectOwner,
+  requireKioskGymOwner,
+  registerTeamFace
 );
 router.get('/config', kioskOperationRateLimit, protectKiosk, getKioskConfig);
 router.post('/face/identify', kioskFaceIdentifyRateLimit, protectKiosk, identifyFace);

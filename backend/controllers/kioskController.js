@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 
 const Business = require('../models/Business');
 const Member = require('../models/Member');
+const TrainerStaff = require('../models/TrainerStaff');
 const MemberMembership = require('../models/MemberMembership');
 const Attendance = require('../models/Attendance');
 const KioskCredential = require('../models/KioskCredential');
@@ -450,28 +451,53 @@ exports.identifyFace = async (req, res) => {
       });
     }
     const best = comparison.best;
-    const member = await Member.findOne({
-      _id: best.record.memberId,
-      tenantId: req.kiosk.tenantId,
-      businessId: req.kiosk.businessId,
-      deletedAt: null
-    }).select('_id fullName status');
-    if (!member) {
-      return res.status(404).json({ success: false, code: 'MEMBER_NOT_RECOGNIZED', message: 'Member not recognized.' });
+    const record = best.record;
+    const subjectType = record.subjectType || 'Member';
+    let subject;
+    if (subjectType === 'Member') {
+      subject = await Member.findOne({
+        _id: record.memberId,
+        tenantId: req.kiosk.tenantId,
+        businessId: req.kiosk.businessId,
+        deletedAt: null
+      }).select('_id fullName status');
+    } else {
+      subject = await TrainerStaff.findOne({
+        _id: record.subjectId,
+        tenantId: req.kiosk.tenantId,
+        role: subjectType,
+        status: 'Active'
+      }).select('_id name status trainerId staffId role');
     }
-    if (member.status !== 'Active') {
-      return res.status(403).json({
+    if (!subject) {
+      return res.status(404).json({
         success: false,
-        code: 'MEMBER_INACTIVE',
-        message: 'Member access is inactive or blocked.'
+        code: 'SUBJECT_NOT_RECOGNIZED',
+        message: `${subjectType} not recognized.`
       });
     }
+    if (subject.status !== 'Active') {
+      return res.status(403).json({
+        success: false,
+        code: 'SUBJECT_INACTIVE',
+        message: `${subjectType} access is inactive or blocked.`
+      });
+    }
+    const subjectId = String(subject._id);
+    const subjectName = subjectType === 'Member' ? subject.fullName : subject.name;
+    const publicId = subjectType === 'Trainer'
+      ? subject.trainerId
+      : subjectType === 'Staff'
+        ? subject.staffId
+        : (subject.legacyMemberId || subjectId);
     const matchToken = jwt.sign({
       purpose: 'face-match',
       tenantId: String(req.kiosk.tenantId),
       businessId: String(req.kiosk.businessId),
       credentialId: req.kiosk.credentialId,
-      memberId: String(member._id),
+      subjectType,
+      subjectId,
+      memberId: subjectType === 'Member' ? subjectId : undefined,
       templateId: String(best.record._id)
     }, KIOSK_TOKEN_SECRET, {
       expiresIn: '60s',
@@ -479,7 +505,13 @@ exports.identifyFace = async (req, res) => {
     });
     return res.json({
       success: true,
-      member: { id: String(member._id), fullName: member.fullName },
+      member: { id: subjectId, fullName: subjectName },
+      subject: {
+        id: subjectId,
+        name: subjectName,
+        type: subjectType,
+        publicId: publicId || subjectId
+      },
       matchConfidence: Number(best.similarity.toFixed(4)),
       matchToken
     });
@@ -599,7 +631,9 @@ exports.faceCheckIn = async (req, res) => {
       match.tenantId !== String(req.kiosk.tenantId) ||
       match.businessId !== String(req.kiosk.businessId) ||
       match.credentialId !== req.kiosk.credentialId ||
-      match.memberId !== memberId ||
+      ((match.subjectType && match.subjectType !== 'Member')
+        ? match.subjectId !== memberId
+        : match.memberId !== memberId) ||
       !mongoose.Types.ObjectId.isValid(match.templateId)
     ) {
       return res.status(401).json({ success: false, code: 'FACE_MATCH_INVALID', message: 'Face match does not authorize this check-in.' });
@@ -608,17 +642,130 @@ exports.faceCheckIn = async (req, res) => {
     if (!business?.faceAttendanceEnabled) {
       return res.status(403).json({ success: false, code: 'FACE_ATTENDANCE_DISABLED', message: 'Face attendance is disabled for this gym.' });
     }
-    const registration = await BiometricCredential.findOne({
+    const subjectType = match.subjectType || 'Member';
+    const registrationFilter = {
       _id: match.templateId,
       tenantId: req.kiosk.tenantId,
       businessId: req.kiosk.businessId,
-      memberId,
       biometricType: 'Face',
       registrationStatus: 'Active',
       consentStatus: 'Granted'
-    }).select('_id');
+    };
+    if (subjectType === 'Member') registrationFilter.memberId = memberId;
+    else {
+      registrationFilter.subjectType = subjectType;
+      registrationFilter.subjectId = memberId;
+    }
+    const registration = await BiometricCredential.findOne(registrationFilter).select('_id');
     if (!registration) {
       return res.status(404).json({ success: false, code: 'MEMBER_NOT_RECOGNIZED', message: 'Member not recognized.' });
+    }
+    if (subjectType !== 'Member') {
+      const action = req.body?.action === 'check-out' ? 'check-out' : 'check-in';
+      const businessDetails = await Business.findById(req.kiosk.tenantId).select('timeZone').lean();
+      const timeZone = isValidTimeZone(businessDetails?.timeZone)
+        ? businessDetails.timeZone
+        : 'Asia/Kolkata';
+      const now = new Date();
+      const dayStart = getAttendanceDayBounds(now, timeZone).start;
+      const subject = await TrainerStaff.findOne({
+        _id: memberId,
+        tenantId: req.kiosk.tenantId,
+        role: subjectType,
+        status: 'Active'
+      }).select('_id name trainerId staffId');
+      if (!subject) {
+        return res.status(403).json({ success: false, code: 'SUBJECT_INACTIVE', message: `${subjectType} access is inactive or blocked.` });
+      }
+      const existingIdempotent = await Attendance.findOne({
+        tenantId: req.kiosk.tenantId,
+        subjectType,
+        subjectId: subject._id,
+        attendanceType: 'Biometric',
+        kioskIdempotencyKey: idempotencyKey
+      }).select('_id');
+      if (existingIdempotent) {
+        return res.status(200).json({
+          success: true,
+          code: 'ATTENDANCE_ALREADY_RECORDED',
+          message: 'Attendance already recorded.',
+          subject: {
+            id: String(subject._id),
+            name: subject.name,
+            type: subjectType,
+            publicId: subjectType === 'Trainer' ? subject.trainerId : subject.staffId
+          }
+        });
+      }
+      const openSession = await Attendance.findOne({
+        tenantId: req.kiosk.tenantId,
+        subjectType,
+        subjectId: subject._id,
+        attendanceDate: dayStart,
+        checkOut: null
+      }).sort({ checkIn: -1 });
+      if (action === 'check-in') {
+        if (openSession) {
+          return res.status(409).json({
+            success: false,
+            code: 'ALREADY_CHECKED_IN',
+            message: `${subjectType} is already checked in.`,
+            subject: { id: String(subject._id), name: subject.name, type: subjectType },
+            checkInTime: openSession.checkIn
+          });
+        }
+        const [attendance] = await Attendance.create([{
+          tenantId: req.kiosk.tenantId,
+          businessId: req.kiosk.businessId,
+          subjectType,
+          subjectId: subject._id,
+          subjectRef: 'TrainerStaff',
+          attendanceDate: dayStart,
+          checkIn: now,
+          attendanceType: 'Biometric',
+          status: 'Present',
+          notes: `Face recognition kiosk ${subjectType.toLowerCase()} check-in`,
+          kioskIdempotencyKey: idempotencyKey,
+          createdBy: req.kiosk.createdBy
+        }]);
+        return res.status(201).json({
+          success: true,
+          code: 'CHECK_IN_SUCCESS',
+          message: `${subjectType} check-in successful.`,
+          subject: {
+            id: String(subject._id),
+            name: subject.name,
+            type: subjectType,
+            publicId: subjectType === 'Trainer' ? subject.trainerId : subject.staffId
+          },
+          checkInTime: attendance.checkIn
+        });
+      }
+      if (!openSession) {
+        return res.status(409).json({
+          success: false,
+          code: 'CHECK_OUT_WITHOUT_CHECK_IN',
+          message: `No open check-in found for this ${subjectType.toLowerCase()}.`
+        });
+      }
+      const checkOutAt = new Date(Math.max(now.getTime(), openSession.checkIn.getTime()));
+      const durationMinutes = Math.max(0, Math.floor((checkOutAt - openSession.checkIn) / 60000));
+      await Attendance.updateOne(
+        { _id: openSession._id, tenantId: req.kiosk.tenantId, checkOut: null },
+        { $set: { checkOut: checkOutAt, checkoutType: 'MANUAL', durationMinutes } }
+      );
+      return res.status(200).json({
+        success: true,
+        code: 'CHECK_OUT_SUCCESS',
+        message: `${subjectType} check-out successful.`,
+        subject: {
+          id: String(subject._id),
+          name: subject.name,
+          type: subjectType,
+          publicId: subjectType === 'Trainer' ? subject.trainerId : subject.staffId
+        },
+        checkOutTime: checkOutAt
+      });
     }
     const existingIdempotent = await Attendance.findOne({
       tenantId: req.kiosk.tenantId,

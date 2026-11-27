@@ -93,7 +93,7 @@ describe('App', () => {
     expect(systemGroup?.items.map(item => item.name)).toEqual(['Settings', 'Database Storage']);
   });
 
-  it('places Global Message directly below Enquiry Management in Management navigation', () => {
+  it('shows separate Trainer and Staff entries in Management navigation', () => {
     const fixture = TestBed.createComponent(App);
     const managementGroup = fixture.componentInstance.menuGroups.find(group => group.title === 'MANAGEMENT');
 
@@ -101,7 +101,8 @@ describe('App', () => {
       'Expense Tracker',
       'Enquiry Management',
       'Global Message',
-      'Trainers & Staff',
+      'Trainers',
+      'Staff',
       'Reports & Analytics'
     ]);
   });

@@ -56,6 +56,11 @@
         <p>Use face recognition for a fast, secure check-in.</p>
       </div>
 
+      <div class="kiosk-action-toggle" aria-label="Attendance action">
+        <button type="button" [class.active]="kioskAction === 'check-in'" (click)="kioskAction = 'check-in'">Check In</button>
+        <button type="button" [class.active]="kioskAction === 'check-out'" (click)="kioskAction = 'check-out'">Check Out</button>
+      </div>
+
       <div class="actions">
         <button type="button" class="face-action" (click)="startFaceScan()" [disabled]="!faceEnabled || scanning">
           <span class="action-icon" aria-hidden="true">◎</span>
@@ -148,7 +153,33 @@
         </div>
       </section>
 
-      <ng-container *ngIf="staffAuthStep === 'authorized' && !staffSelectedMember">
+      <section class="team-biometric-enrollment" *ngIf="staffAuthStep === 'authorized' && teamEnrollmentSubjectType && teamEnrollmentSubjectId">
+        <h3>{{ teamEnrollmentSubjectType === 'trainer' ? 'Trainer' : 'Staff' }} Biometric Enrollment</h3>
+        <p>By continuing, the person explicitly consents to secure facial biometric data being used for gym attendance identification.</p>
+        <label class="consent-row">
+          <input type="checkbox" [(ngModel)]="staffConsent" name="teamBiometricConsent">
+          I confirm explicit consent was received.
+        </label>
+        <label class="consent-row">
+          <input type="checkbox" [(ngModel)]="staffReplaceExisting" name="teamBiometricReplace">
+          Authorized replacement/re-enrollment of an existing face.
+        </label>
+        <video *ngIf="enrollmentCameraActive" #enrollmentVideo autoplay muted playsinline></video>
+        <p class="auth-error" *ngIf="staffEnrollmentError" role="alert">{{ staffEnrollmentError }}</p>
+        <p *ngIf="staffEnrollmentSuccess" role="status">Biometric enrollment completed successfully.</p>
+        <div class="self-registration-actions">
+          <button type="button" class="primary-action" (click)="startTeamEnrollmentCamera()"
+            [disabled]="!staffConsent || enrollmentCameraActive || staffEnrollmentLoading">
+            Start Camera
+          </button>
+          <button type="button" class="primary-action" (click)="captureTeamEnrollment()"
+            [disabled]="!enrollmentCameraActive || staffEnrollmentLoading">
+            {{ staffEnrollmentLoading ? 'Processing…' : 'Capture & Register' }}
+          </button>
+        </div>
+      </section>
+
+      <ng-container *ngIf="staffAuthStep === 'authorized' && !staffSelectedMember && !teamEnrollmentSubjectId">
         <form (ngSubmit)="searchStaffMembers()">
           <p>Search existing members by name, Member ID, or registered mobile number.</p>
           <label>Member search
@@ -201,7 +232,7 @@
         </p>
       </ng-container>
 
-      <ng-container *ngIf="staffAuthStep === 'authorized' && staffSelectedMember">
+      <ng-container *ngIf="staffAuthStep === 'authorized' && staffSelectedMember && !teamEnrollmentSubjectId">
         <ng-container *ngIf="staffSelectedMember as member">
         <div class="self-member-summary">
           <strong>{{ member.fullName }}</strong>

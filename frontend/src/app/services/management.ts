@@ -176,4 +176,19 @@ export class ManagementService {
     return this.http.delete(`${this.baseUrl}/biometric/kiosk-credentials/${id}`);
   }
 
+  getTeamFaceStatus(role: 'Trainer' | 'Staff', id: string): Observable<any> {
+    const subjectType = role.toLowerCase();
+    return this.http.get(`${this.baseUrl}/biometric/credentials/${subjectType}/${id}/face/status`);
+  }
+
+  registerTeamFace(role: 'Trainer' | 'Staff', id: string, data: object): Observable<any> {
+    const subjectType = role.toLowerCase();
+    return this.http.post(`${this.baseUrl}/biometric/credentials/${subjectType}/${id}/face`, data);
+  }
+
+  revokeTeamFace(role: 'Trainer' | 'Staff', id: string): Observable<any> {
+    const subjectType = role.toLowerCase();
+    return this.http.delete(`${this.baseUrl}/biometric/credentials/${subjectType}/${id}/face`);
+  }
+
 }

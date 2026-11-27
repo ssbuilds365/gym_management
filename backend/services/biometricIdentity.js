@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const Member = require('../models/Member');
+const TrainerStaff = require('../models/TrainerStaff');
 const BiometricCredential = require('../models/BiometricCredential');
 const BiometricEnrollmentLock = require('../models/BiometricEnrollmentLock');
 const { encryptTemplate, decryptTemplate } = require('../utils/biometricTemplateEncryption');
@@ -112,6 +113,8 @@ const enrollFaceTemplate = async ({
   tenantId,
   businessId,
   memberId,
+  subjectType = 'Member',
+  subjectId,
   descriptor,
   consentTextVersion,
   createdBy,
@@ -139,23 +142,40 @@ const enrollFaceTemplate = async ({
   }
 
   return withBiometricGymLock(tenantId, businessId, async session => {
-      const member = await Member.findOne({
-        _id: memberId,
-        tenantId,
-        businessId,
-        deletedAt: null,
-        status: 'Active'
-      }).select('_id').session(session);
-      if (!member) {
-        throw new BiometricIdentityError('MEMBER_NOT_FOUND', 'Active member not found.', 404);
+      let subject;
+      if (subjectType === 'Member') {
+        subject = await Member.findOne({
+          _id: subjectId || memberId,
+          tenantId,
+          businessId,
+          deletedAt: null,
+          status: 'Active'
+        }).select('_id').session(session);
+        if (!subject) {
+          throw new BiometricIdentityError('MEMBER_NOT_FOUND', 'Active member not found.', 404);
+        }
+      } else {
+        subject = await TrainerStaff.findOne({
+          _id: subjectId,
+          tenantId,
+          role: subjectType,
+          status: 'Active'
+        }).select('_id role').session(session);
+        if (!subject) {
+          throw new BiometricIdentityError('SUBJECT_NOT_FOUND', `Active ${subjectType.toLowerCase()} not found.`, 404);
+        }
       }
+      const resolvedSubjectId = subject._id;
+      const subjectFilter = subjectType === 'Member'
+        ? { memberId: resolvedSubjectId }
+        : { subjectType, subjectId: resolvedSubjectId };
 
       const ownCredentialQuery = BiometricCredential.findOne({
         tenantId,
         businessId,
-        memberId: member._id,
         biometricType: 'Face',
-        registrationStatus: 'Active'
+        registrationStatus: 'Active',
+        ...subjectFilter
       }).select('_id modelVersion').session(session);
       const ownCredential = await ownCredentialQuery;
       const credentials = await getActiveCredentials(tenantId, businessId, session, false);
@@ -168,7 +188,9 @@ const enrollFaceTemplate = async ({
       }
 
       for (const record of credentials) {
-        if (String(record.memberId) === String(member._id)) continue;
+        const recordSubjectId = record.subjectId || record.memberId;
+        const recordSubjectType = record.subjectType || 'Member';
+        if (String(recordSubjectId) === String(resolvedSubjectId) && recordSubjectType === subjectType) continue;
         const registeredDescriptor = decryptCredential(record);
         const similarity = cosineSimilarity(descriptor, registeredDescriptor);
         if (similarity >= FACE_MATCH_SIMILARITY_THRESHOLD) {
@@ -186,10 +208,10 @@ const enrollFaceTemplate = async ({
           {
             tenantId,
             businessId,
-            memberId: member._id,
             biometricType: 'Face',
             registrationStatus: 'Active',
-            modelVersion: { $ne: FACE_MODEL_VERSION }
+            modelVersion: { $ne: FACE_MODEL_VERSION },
+            ...subjectFilter
           },
           {
             $set: { registrationStatus: 'MigrationRequired' }
@@ -200,10 +222,10 @@ const enrollFaceTemplate = async ({
           {
             tenantId,
             businessId,
-            memberId: member._id,
             biometricType: 'Face',
             registrationStatus: 'Active',
-            modelVersion: FACE_MODEL_VERSION
+            modelVersion: FACE_MODEL_VERSION,
+            ...subjectFilter
           },
           {
             $set: {
@@ -222,7 +244,10 @@ const enrollFaceTemplate = async ({
       const [savedCredential] = await BiometricCredential.create([{
         tenantId,
         businessId,
-        memberId: member._id,
+        ...(subjectType === 'Member'
+          ? { memberId: resolvedSubjectId }
+          : { memberId: null, subjectType, subjectId: resolvedSubjectId,
+              subjectRef: 'TrainerStaff' }),
         biometricType: 'Face',
         encryptedTemplate,
         modelVersion: FACE_MODEL_VERSION,
@@ -249,15 +274,17 @@ const enrollFaceTemplate = async ({
   });
 };
 
-const revokeFaceTemplates = (tenantId, businessId, memberId, actorId) =>
+const revokeFaceTemplates = (tenantId, businessId, memberId, actorId, subjectType = 'Member', subjectId = null) =>
   withBiometricGymLock(tenantId, businessId, session =>
     BiometricCredential.updateMany(
       {
         tenantId,
         businessId,
-        memberId,
         biometricType: 'Face',
-        registrationStatus: 'Active'
+        registrationStatus: 'Active',
+        ...(subjectType === 'Member'
+          ? { memberId: memberId || subjectId }
+          : { subjectType, subjectId: subjectId || memberId })
       },
       {
         $set: {
@@ -286,7 +313,10 @@ const compareFaceDescriptor = (descriptor, records) => {
   })).sort((left, right) => right.similarity - left.similarity);
 
   const qualified = matches.filter(match => match.similarity >= FACE_MATCH_SIMILARITY_THRESHOLD);
-  const qualifiedMembers = new Set(qualified.map(match => String(match.record.memberId)));
+  const identityKey = record => record.subjectType && record.subjectId
+    ? `${record.subjectType}:${record.subjectId}`
+    : `Member:${record.memberId}`;
+  const qualifiedMembers = new Set(qualified.map(match => identityKey(match.record)));
   if (qualifiedMembers.size > 1) {
     return { status: 'duplicate-identity', matches: qualified };
   }
@@ -294,7 +324,7 @@ const compareFaceDescriptor = (descriptor, records) => {
   if (
     matches.length > 1 &&
     matches[0].similarity - matches[1].similarity < FACE_MATCH_AMBIGUITY_MARGIN &&
-    String(matches[1].record.memberId) !== String(matches[0].record.memberId)
+    identityKey(matches[1].record) !== identityKey(matches[0].record)
   ) {
     return { status: 'ambiguous', matches };
   }

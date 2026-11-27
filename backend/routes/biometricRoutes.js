@@ -10,7 +10,10 @@ const {
   createKioskCredential,
   listKioskCredentials,
   rotateKioskCredential,
-  revokeKioskCredential
+  revokeKioskCredential,
+  getTeamFaceStatus,
+  registerTeamFace,
+  removeTeamFace
 } = require('../controllers/biometricController');
 
 const biometricEnrollmentRateLimit = rateLimit({
@@ -32,6 +35,9 @@ router.get('/credentials/status/:id', getFaceStatus);
 router.get('/duplicates', biometricDiagnosticRateLimit, getFaceDuplicateReport);
 router.post('/credentials/member/:id/face', biometricEnrollmentRateLimit, registerFace);
 router.delete('/credentials/member/:id/face', removeFace);
+router.get('/credentials/:subjectType/:id/face/status', getTeamFaceStatus);
+router.post('/credentials/:subjectType/:id/face', biometricEnrollmentRateLimit, registerTeamFace);
+router.delete('/credentials/:subjectType/:id/face', removeTeamFace);
 router.post('/kiosk-credentials', createKioskCredential);
 router.get('/kiosk-credentials', listKioskCredentials);
 router.post('/kiosk-credentials/:id/rotate', rotateKioskCredential);

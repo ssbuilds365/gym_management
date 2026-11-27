@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const mongoose = require('mongoose');
 const Member = require('../models/Member');
+const TrainerStaff = require('../models/TrainerStaff');
 const BiometricCredential = require('../models/BiometricCredential');
 const KioskCredential = require('../models/KioskCredential');
 const KioskSession = require('../models/KioskSession');
@@ -194,6 +195,132 @@ exports.registerFace = async (req, res) => {
       message: 'Face registration is temporarily unavailable. Please contact gym staff.'
     });
   }
+};
+
+const getTeamSubjectRole = req => {
+  const role = String(req.params.subjectType || '');
+  return role === 'trainer' ? 'Trainer' : role === 'staff' ? 'Staff' : null;
+};
+
+exports.getTeamFaceStatus = async (req, res) => {
+  if (!requireGymAdministrator(req, res)) return;
+  const role = getTeamSubjectRole(req);
+  if (!role || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ success: false, message: 'Invalid trainer or staff reference.' });
+  }
+  const subject = await TrainerStaff.findOne({
+    _id: req.params.id,
+    tenantId: req.tenantId,
+    role
+  }).select('_id status').lean();
+  if (!subject) return res.status(404).json({ success: false, message: `${role} not found.` });
+  const credential = await BiometricCredential.findOne({
+    tenantId: req.tenantId,
+    businessId: req.owner.businessId,
+    subjectType: role,
+    subjectId: subject._id,
+    biometricType: 'Face',
+    registrationStatus: 'Active',
+    consentStatus: 'Granted'
+  }).sort({ updatedAt: -1 }).select('registrationStatus modelVersion consentStatus consentAt consentTextVersion registeredAt updatedAt');
+  if (!credential) {
+    return res.json({ success: true, status: subject.status === 'Active' ? 'NotRegistered' : 'Disabled', registeredAt: null });
+  }
+  if (credential.modelVersion !== FACE_MODEL_VERSION) {
+    return res.json({ success: true, status: 'EnrollmentError', registeredAt: credential.registeredAt, updatedAt: credential.updatedAt });
+  }
+  return res.json({
+    success: true,
+    status: subject.status === 'Active' ? 'Registered' : 'Disabled',
+    registeredAt: credential.registeredAt,
+    updatedAt: credential.updatedAt,
+    consentStatus: credential.consentStatus,
+    consentAt: credential.consentAt,
+    consentTextVersion: credential.consentTextVersion
+  });
+};
+
+exports.registerTeamFace = async (req, res) => {
+  try {
+    if (!requireGymAdministrator(req, res)) return;
+    const role = getTeamSubjectRole(req);
+    if (!role || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid trainer or staff reference.' });
+    }
+    const { images, consentGranted, consentTextVersion, replaceExisting } = req.body || {};
+    if (!Array.isArray(images) || images.length !== 3 || images.some(image => typeof image !== 'string')) {
+      return res.status(400).json({ success: false, code: 'INVALID_FACE_IMAGES', message: 'Three valid camera samples are required.' });
+    }
+    if (consentGranted !== true) {
+      return res.status(400).json({ success: false, message: `Informed ${role.toLowerCase()} consent is required.` });
+    }
+    const normalizedConsentVersion = String(consentTextVersion || '').trim();
+    if (!normalizedConsentVersion || normalizedConsentVersion.length > 100) {
+      return res.status(400).json({ success: false, message: 'Consent text version is required.' });
+    }
+    const subject = await TrainerStaff.findOne({
+      _id: req.params.id,
+      tenantId: req.tenantId,
+      role,
+      status: 'Active'
+    }).select('_id');
+    if (!subject) return res.status(404).json({ success: false, message: `Active ${role.toLowerCase()} not found.` });
+    const descriptor = faceRecognition.assertGeneratedDescriptor(
+      await faceRecognition.descriptorFromImages(images)
+    );
+    const outcome = await enrollFaceTemplate({
+      tenantId: req.tenantId,
+      businessId: req.owner.businessId,
+      subjectType: role,
+      subjectId: subject._id,
+      descriptor,
+      consentTextVersion: normalizedConsentVersion,
+      createdBy: req.owner._id,
+      replaceExisting: replaceExisting === true
+    });
+    if (outcome.status === 'duplicate-face') {
+      return res.status(409).json({ success: false, code: 'DUPLICATE_FACE_DETECTED', message: 'This face is already registered to another person.' });
+    }
+    if (outcome.status === 'already-registered') {
+      return res.status(409).json({ success: false, code: 'FACE_ALREADY_REGISTERED', message: 'Authorized re-enrollment is required to replace this face.' });
+    }
+    return res.status(201).json({
+      success: true,
+      message: 'Face registration saved securely.',
+      status: 'Registered',
+      registeredAt: outcome.registeredAt,
+      modelVersion: FACE_MODEL_VERSION
+    });
+  } catch (error) {
+    if (error instanceof BiometricIdentityError) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+    }
+    console.error('Team face registration failed:', { code: error?.code || 'BIOMETRIC_ERROR' });
+    return res.status(503).json({ success: false, code: 'BIOMETRIC_SERVICE_UNAVAILABLE', message: 'Face registration is temporarily unavailable.' });
+  }
+};
+
+exports.removeTeamFace = async (req, res) => {
+  if (!requireGymAdministrator(req, res)) return;
+  const role = getTeamSubjectRole(req);
+  if (!role || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ success: false, message: 'Invalid trainer or staff reference.' });
+  }
+  const subject = await TrainerStaff.findOne({
+    _id: req.params.id,
+    tenantId: req.tenantId,
+    role
+  }).select('_id');
+  if (!subject) return res.status(404).json({ success: false, message: `${role} not found.` });
+  await revokeFaceTemplates(
+    req.tenantId,
+    req.owner.businessId,
+    null,
+    req.owner._id,
+    role,
+    subject._id
+  );
+  return res.json({ success: true, status: 'Disabled', message: 'Biometric enrollment revoked.' });
 };
 
 exports.removeFace = async (req, res) => {

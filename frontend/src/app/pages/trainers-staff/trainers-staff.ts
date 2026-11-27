@@ -31,6 +31,7 @@ interface TeamRecord {
   status: 'Active' | 'Inactive';
   assignedMemberCount?: number;
   assignedMembers?: Array<{ _id: string; fullName: string; phone: string }>;
+  faceStatus?: 'NotRegistered' | 'Registered' | 'Disabled' | 'EnrollmentError';
 }
 
 interface TeamForm {
@@ -109,6 +110,7 @@ const todayString = (): string => {
 })
 export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   @Input() active = false;
+  @Input() roleMode: 'Combined' | 'Trainer' | 'Staff' = 'Combined';
   trainers: TeamRecord[] = [];
   staff: TeamRecord[] = [];
   trainerTotal = 0;
@@ -272,9 +274,9 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
 
   load(): void {
     this.errorMessage = '';
-    this.loadDirectory('Trainer');
-    this.loadDirectory('Staff');
-    this.loadFinancialPerformance();
+    if (this.roleMode !== 'Staff') this.loadDirectory('Trainer');
+    if (this.roleMode !== 'Trainer') this.loadDirectory('Staff');
+    if (this.roleMode !== 'Staff') this.loadFinancialPerformance();
   }
 
   loadFinancialPerformance(): void {
@@ -306,6 +308,21 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
           this.financialTrainers = [];
         }
       });
+  }
+
+  get trainersAssignedMemberCount(): number {
+    return this.trainers.reduce(
+      (total, trainer) => total + Number(trainer.assignedMemberCount || 0),
+      0
+    );
+  }
+
+  get staffDepartmentCount(): number {
+    return new Set(
+      this.staff
+        .map(person => String(person.department || '').trim())
+        .filter(Boolean)
+    ).size;
   }
 
   formatCurrency(amount: number): string {
@@ -587,6 +604,54 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
 
   view(record: TeamRecord): void {
     this.selectedRecord = record;
+    this.loadTeamFaceStatus(record);
+  }
+
+  loadTeamFaceStatus(record: TeamRecord): void {
+    this.management.getTeamFaceStatus(record.role, record._id).subscribe({
+      next: response => {
+        record.faceStatus = response.status === 'Registered'
+          ? 'Registered'
+          : response.status === 'Disabled'
+            ? 'Disabled'
+            : response.status === 'EnrollmentError'
+              ? 'EnrollmentError'
+              : 'NotRegistered';
+        if (this.selectedRecord?._id === record._id) this.selectedRecord = { ...record };
+      },
+      error: () => {
+        record.faceStatus = 'EnrollmentError';
+      }
+    });
+  }
+
+  openTeamBiometricEnrollment(record: TeamRecord): void {
+    if (!record || record.status !== 'Active') return;
+    const consent = window.confirm(
+      'Capture facial biometric data only with this person’s explicit consent. The face template will be encrypted and used only for gym attendance. Continue?'
+    );
+    if (!consent) return;
+    const subjectType = record.role.toLowerCase();
+    window.open(
+      `/attendance-kiosk?teamEnrollment=${encodeURIComponent(subjectType)}&subjectId=${encodeURIComponent(record._id)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }
+
+  revokeTeamBiometric(record: TeamRecord): void {
+    if (!record) return;
+    if (!window.confirm(`Disable and revoke biometric enrollment for ${record.name}?`)) return;
+    this.management.revokeTeamFace(record.role, record._id).subscribe({
+      next: () => {
+        record.faceStatus = 'Disabled';
+        if (this.selectedRecord?._id === record._id) this.selectedRecord = { ...record };
+        this.successMessage = 'Biometric enrollment revoked.';
+      },
+      error: error => {
+        this.errorMessage = error.error?.message || 'Unable to revoke biometric enrollment.';
+      }
+    });
   }
 
   setStatus(record: TeamRecord, status: 'Active' | 'Inactive'): void {
