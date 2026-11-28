@@ -73,6 +73,17 @@ export class ManagementService {
     return this.http.get(`${this.baseUrl}/trainers-staff/financial-performance`);
   }
 
+  getExpiringPTClients(options: {
+    search?: string;
+    trainerId?: string;
+  } = {}): Observable<any> {
+    let params = new HttpParams();
+    Object.entries(options).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') params = params.set(key, value);
+    });
+    return this.http.get(`${this.baseUrl}/trainers-staff/expiring-pt-clients`, { params });
+  }
+
   getTrainerPTPackages(trainerId: string, options: {
     status?: string;
     page?: number;

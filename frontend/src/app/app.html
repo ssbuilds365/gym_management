@@ -165,7 +165,8 @@
 
       <div class="stats-grid" *ngIf="!dashboardError">
         <ng-container *ngIf="!dashboardLoading; else dashboardStatSkeletons">
-          <div class="stat-card" *ngFor="let stat of stats">
+          <button class="stat-card" type="button" *ngFor="let stat of stats"
+            (click)="stat.action === 'expiringPT' ? expiringPTPanelOpen = true : null">
             <div class="stat-top">
               <span>{{ stat.title }}</span>
               <div class="stat-icon" [ngClass]="stat.color">{{ stat.icon }}</div>
@@ -174,7 +175,7 @@
             <div class="stat-bottom">
               <span>{{ stat.description }}</span>
             </div>
-          </div>
+          </button>
         </ng-container>
         <ng-template #dashboardStatSkeletons>
           <div class="dashboard-skeleton-stats" role="status" aria-label="Loading dashboard statistics">
@@ -186,6 +187,32 @@
           </div>
         </ng-template>
       </div>
+
+      <section class="panel expiring-pt-panel" *ngIf="expiringPTPanelOpen">
+        <div class="attendance-report-header">
+          <div>
+            <span class="eyebrow">NEXT 5 DAYS</span>
+            <h2>Expiring Personal Training Clients</h2>
+          </div>
+          <button type="button" class="secondary-btn" (click)="expiringPTPanelOpen = false">Close</button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Member</th><th>Phone</th><th>Trainer</th><th>PT Package</th><th>Expiry</th><th>Remaining</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let row of expiringPTClients">
+                <td><strong>{{ row.member.fullName }}</strong><br><small>{{ row.member.memberId || row.member._id }}</small></td>
+                <td>{{ row.member.phone || '—' }}</td>
+                <td>{{ row.trainer?.name || '—' }}</td>
+                <td>{{ row.packageName }}</td>
+                <td>{{ row.expiryDate | date:'mediumDate' }}</td>
+                <td><span class="status warning">{{ row.remainingDays <= 0 ? 'Expires Today' : (row.remainingDays + ' ' + (row.remainingDays === 1 ? 'Day Left' : 'Days Left')) }}</span></td>
+              </tr>
+              <tr *ngIf="!expiringPTClients.length"><td colspan="6" class="empty">No PT packages expire in the next 5 days.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="attendance-report-panel panel" aria-labelledby="attendance-report-heading" *ngIf="!dashboardError">
         <div class="attendance-report-header">

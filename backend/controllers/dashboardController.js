@@ -3,7 +3,13 @@ const Attendance = require('../models/Attendance');
 const MemberMembership = require('../models/MemberMembership');
 const Payment = require('../models/Payment');
 const Business = require('../models/Business');
+const TrainerPTPackage = require('../models/TrainerPTPackage');
+const TrainerStaff = require('../models/TrainerStaff');
 const { getDashboardPeriods, getLocalDateParts } = require('../utils/dashboardPeriods');
+const {
+  getExpiringPTWindow,
+  getRemainingDays
+} = require('../utils/expiringPTClients');
 const {
   isValidTimeZone,
   DEFAULT_TIME_ZONE
@@ -26,13 +32,15 @@ exports.getDashboardStats = async (req, res) => {
       : DEFAULT_TIME_ZONE;
     const now = new Date();
     const periods = getDashboardPeriods(now, dashboardTimeZone);
+    const ptWindow = getExpiringPTWindow(now, dashboardTimeZone);
     const [
       totalMembers,
       activeMembers,
       todayAttendance,
       paymentSummary,
       recentMembers,
-      paymentCollections
+      paymentCollections,
+      expiringPTPackages
     ] =
       await Promise.all([
         Member.countDocuments({ tenantId, deletedAt: null }),
@@ -159,10 +167,46 @@ exports.getDashboardStats = async (req, res) => {
             }
           },
           { $sort: { _id: 1 } }
-        ])
+        ]),
+        TrainerPTPackage.find({
+          tenantId,
+          businessId: req.owner.businessId,
+          status: 'Active',
+          endDate: { $gte: ptWindow.start, $lt: ptWindow.endExclusive }
+        })
+          .populate('memberId', 'fullName phone memberId')
+          .populate('trainerId', 'name trainerId')
+          .sort({ endDate: 1, createdAt: -1 })
+          .lean()
       ]);
 
     const [collectionResult, outstandingResult] = paymentSummary;
+    const expiringByMember = new Map();
+    for (const ptPackage of expiringPTPackages) {
+      if (!ptPackage.memberId) continue;
+      const memberId = String(ptPackage.memberId._id || ptPackage.memberId);
+      if (!expiringByMember.has(memberId)) {
+        expiringByMember.set(memberId, {
+          packageId: ptPackage._id,
+          member: {
+            _id: ptPackage.memberId._id,
+            fullName: ptPackage.memberId.fullName,
+            phone: ptPackage.memberId.phone,
+            memberId: ptPackage.memberId.memberId
+          },
+          trainer: ptPackage.trainerId
+            ? { _id: ptPackage.trainerId._id, name: ptPackage.trainerId.name, trainerId: ptPackage.trainerId.trainerId }
+            : null,
+          packageName: ptPackage.packageName,
+          startDate: ptPackage.startDate,
+          expiryDate: ptPackage.endDate,
+          remainingDays: getRemainingDays(ptPackage.endDate, now, dashboardTimeZone),
+          status: 'Active'
+        });
+      }
+    }
+    const expiringPTClients = Array.from(expiringByMember.values())
+      .sort((a, b) => a.remainingDays - b.remainingDays);
     const collectionByMonth = new Map(
       paymentCollections.map((item) => [item._id, item])
     );
@@ -190,7 +234,8 @@ exports.getDashboardStats = async (req, res) => {
         activeMembers,
         todayAttendance,
         totalCollected: collectionResult[0]?.totalCollected || 0,
-        totalPending: outstandingResult[0]?.totalPending || 0
+        totalPending: outstandingResult[0]?.totalPending || 0,
+        expiringPTClients: expiringPTClients.length
       },
       collections: {
         today: currentPeriodCollection?.todayCollection || 0,
@@ -198,6 +243,8 @@ exports.getDashboardStats = async (req, res) => {
         month: currentPeriodCollection?.monthCollection || 0,
         monthlyRevenue
       },
+      expiringPTClients,
+      expiringPTWindow: 'Next 5 Days',
       recentMembers
     });
 

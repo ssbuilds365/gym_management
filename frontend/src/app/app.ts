@@ -81,10 +81,13 @@ export class App implements OnInit, OnDestroy {
   memberRegistrationRequest: any = null;
   memberConversionSubmission: any = null;
   memberConversionResult: any = null;
-  readonly dashboardStatPlaceholders = [0, 1, 2, 3];
+  readonly dashboardStatPlaceholders = [0, 1, 2, 3, 4];
 
   dashboardLoading = false;
   dashboardError = '';
+  expiringPTClients: any[] = [];
+  expiringPTCount = 0;
+  expiringPTPanelOpen = false;
   todayAttendance = 0;
   dashboardTimeZone = 'Asia/Kolkata';
   attendanceSearchType: 'Member' | 'Staff' | 'Trainer' = 'Member';
@@ -523,6 +526,10 @@ export class App implements OnInit, OnDestroy {
           this.dashboardSessionId = this.lastVerifiedSessionId;
 
           this.todayAttendance = data.todayAttendance ?? 0;
+          this.expiringPTClients = Array.isArray(response.expiringPTClients)
+            ? response.expiringPTClients
+            : [];
+          this.expiringPTCount = Number(data.expiringPTClients || this.expiringPTClients.length);
 
           this.stats = [
             {
@@ -556,6 +563,15 @@ export class App implements OnInit, OnDestroy {
               description: 'Remaining membership fees',
               icon: '◷',
               color: 'red'
+            },
+            {
+              title: 'Expiring Personal Training Clients',
+              value: this.expiringPTCount.toLocaleString('en-IN'),
+              change: '',
+              description: 'Next 5 Days',
+              icon: '⚠',
+              color: 'red',
+              action: 'expiringPT'
             }
           ];
 

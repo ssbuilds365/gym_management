@@ -2,8 +2,10 @@
   <header class="page-heading">
     <div>
       <span class="eyebrow">TEAM MANAGEMENT</span>
-      <h2>Trainers &amp; Staff</h2>
-      <p>Manage trainer assignments and business staff.</p>
+      <h2>{{ roleMode === 'Staff' ? 'Staff' : 'Trainers' }}</h2>
+      <p>{{ roleMode === 'Staff'
+        ? 'Manage staff profiles, designations, departments and staff information.'
+        : 'Manage trainer profiles, specializations, assigned members and personal training.' }}</p>
     </div>
     <button class="secondary-btn" type="button" (click)="load()" [disabled]="loading">Refresh</button>
   </header>
@@ -14,6 +16,11 @@
       <article class="summary-card"><span>Active Trainers</span><strong>{{ activeTrainerTotal }}</strong></article>
       <article class="summary-card"><span>Inactive Trainers</span><strong>{{ trainerTotal - activeTrainerTotal }}</strong></article>
       <article class="summary-card"><span>Assigned Members</span><strong>{{ trainersAssignedMemberCount }}</strong></article>
+      <button class="summary-card expiring-card" type="button" (click)="openExpiringPTPanel()">
+        <span>Expiring Personal Training Clients</span>
+        <strong>{{ expiringPTCount }}</strong>
+        <small>Next 5 Days</small>
+      </button>
     </ng-container>
     <ng-container *ngIf="roleMode !== 'Trainer'">
       <article class="summary-card"><span>Total Staff</span><strong>{{ staffTotal }}</strong></article>
@@ -22,6 +29,35 @@
       <article class="summary-card"><span>Departments</span><strong>{{ staffDepartmentCount }}</strong></article>
     </ng-container>
   </div>
+
+  <section class="section-panel expiring-panel" *ngIf="expiringPTPanelOpen && roleMode !== 'Staff'">
+    <div class="section-heading">
+      <div><span class="eyebrow">NEXT 5 DAYS</span><h3>Expiring Personal Training Clients</h3></div>
+      <button class="secondary-btn" type="button" (click)="expiringPTPanelOpen = false">Close</button>
+    </div>
+    <div class="directory-tools">
+      <input aria-label="Search expiring PT clients" placeholder="Search member name, ID or phone…" [(ngModel)]="expiringPTSearch" (ngModelChange)="loadExpiringPTClients()">
+    </div>
+    <p class="error-message" *ngIf="expiringPTError" role="alert">{{ expiringPTError }}</p>
+    <p class="loading-message" *ngIf="expiringPTLoading">Loading expiring PT clients…</p>
+    <div class="table-scroll" *ngIf="!expiringPTLoading">
+      <table>
+        <thead><tr><th>Member</th><th>Phone</th><th>Trainer</th><th>PT Package</th><th>Start</th><th>Expiry</th><th>Remaining</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let row of expiringPTRecords">
+            <td><strong>{{ row.member.fullName }}</strong><br><small>{{ row.member.memberId || row.member._id }}</small></td>
+            <td>{{ row.member.phone || '—' }}</td>
+            <td>{{ row.trainer?.name || '—' }}</td>
+            <td>{{ row.packageName }}</td>
+            <td>{{ row.startDate | date:'mediumDate' }}</td>
+            <td>{{ row.expiryDate | date:'mediumDate' }}</td>
+            <td><span class="status warning">{{ expiringLabel(row.remainingDays) }}</span></td>
+          </tr>
+          <tr *ngIf="!expiringPTRecords.length"><td colspan="7" class="empty">No PT packages expire in the next 5 days.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="section-panel financial-panel" *ngIf="roleMode !== 'Staff'">
     <div class="section-heading">
@@ -122,7 +158,7 @@
       <button type="button" class="secondary-btn" (click)="searchDirectory('Trainer')">Search</button>
     </div>
     <p *ngIf="loading" class="loading-message">Loading trainers…</p>
-    <div class="table-scroll" *ngIf="!loading">
+    <div class="table-scroll desktop-table-scroll" *ngIf="!loading">
       <table>
         <thead><tr><th>Trainer</th><th>Phone</th><th>Email</th><th>Specialization</th><th>Members</th><th>Assigned Batches</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -146,6 +182,23 @@
           <tr *ngIf="!trainers.length"><td colspan="8" class="empty">No trainers match this search.</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="mobile-team-cards" *ngIf="!loading">
+      <article class="mobile-team-card" *ngFor="let trainer of trainers">
+        <div class="mobile-team-heading"><strong>{{ trainer.name }}</strong><span class="status" [class.inactive]="trainer.status === 'Inactive'">{{ trainer.status }}</span></div>
+        <small>{{ trainer.trainerId || 'ID pending migration' }}</small>
+        <p>{{ trainer.phone }} · {{ trainer.email || 'No email' }}</p>
+        <p><strong>Specialization:</strong> {{ trainer.specialization || '—' }}</p>
+        <p><strong>Members:</strong> {{ trainer.assignedMemberCount || 0 }}</p>
+        <div class="actions">
+          <button type="button" (click)="view(trainer)">View</button>
+          <button type="button" (click)="edit(trainer)">Edit</button>
+          <button type="button" (click)="openAssignments(trainer)">Members</button>
+          <button type="button" (click)="openPTPackages(trainer)">PT Packages</button>
+          <button type="button" *ngIf="trainer.status === 'Active'" class="danger" (click)="setStatus(trainer, 'Inactive')">Deactivate</button>
+          <button type="button" *ngIf="trainer.status === 'Inactive'" (click)="setStatus(trainer, 'Active')">Activate</button>
+        </div>
+      </article>
     </div>
     <div class="pagination" *ngIf="trainerPages > 1">
       <button class="secondary-btn" type="button" [disabled]="trainerPage <= 1 || loading" (click)="changePage('Trainer', -1)">Previous</button>
@@ -192,7 +245,7 @@
       <button type="button" class="secondary-btn" (click)="searchDirectory('Staff')">Search</button>
     </div>
     <p *ngIf="loading" class="loading-message">Loading staff…</p>
-    <div class="table-scroll" *ngIf="!loading">
+    <div class="table-scroll desktop-table-scroll" *ngIf="!loading">
       <table>
         <thead><tr><th>Staff Name</th><th>Phone</th><th>Email</th><th>Designation / Department</th><th>Joining Date</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -212,6 +265,21 @@
         </tbody>
       </table>
     </div>
+    <div class="mobile-team-cards" *ngIf="!loading">
+      <article class="mobile-team-card" *ngFor="let person of staff">
+        <div class="mobile-team-heading"><strong>{{ person.name }}</strong><span class="status" [class.inactive]="person.status === 'Inactive'">{{ person.status }}</span></div>
+        <small>{{ person.staffId || '—' }}</small>
+        <p>{{ person.phone }} · {{ person.email || 'No email' }}</p>
+        <p><strong>Designation:</strong> {{ person.designation || '—' }}</p>
+        <p><strong>Department:</strong> {{ person.department || '—' }}</p>
+        <div class="actions">
+          <button type="button" (click)="view(person)">View</button>
+          <button type="button" (click)="edit(person)">Edit</button>
+          <button type="button" *ngIf="person.status === 'Active'" class="danger" (click)="setStatus(person, 'Inactive')">Deactivate</button>
+          <button type="button" *ngIf="person.status === 'Inactive'" (click)="setStatus(person, 'Active')">Activate</button>
+        </div>
+      </article>
+    </div>
     <div class="pagination" *ngIf="staffPages > 1">
       <button class="secondary-btn" type="button" [disabled]="staffPage <= 1 || loading" (click)="changePage('Staff', -1)">Previous</button>
       <span>Page {{ staffPage }} of {{ staffPages }} · {{ staffMatchTotal }} matching staff</span>
@@ -220,7 +288,12 @@
   </section>
 
   <section class="section-panel reports-panel">
-    <div class="section-heading"><div><span class="eyebrow">TEAM INSIGHTS</span><h3>Trainers &amp; Staff Reports</h3></div></div>
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow">TEAM INSIGHTS</span>
+        <h3>{{ roleMode === 'Staff' ? 'Staff Reports' : 'Trainer Reports' }}</h3>
+      </div>
+    </div>
     <div class="report-filters">
       <label>Date range
         <select [(ngModel)]="reportPeriod" (ngModelChange)="setReportPeriod($event)">
@@ -230,7 +303,7 @@
       </label>
       <label *ngIf="reportPeriod === 'custom'">From<input type="date" [(ngModel)]="reportFrom"></label>
       <label *ngIf="reportPeriod === 'custom'">To<input type="date" [(ngModel)]="reportTo"></label>
-      <label>Team
+      <label *ngIf="roleMode === 'Combined'">Team
         <select [(ngModel)]="reportRole"><option value="">Trainers &amp; Staff</option><option value="Trainer">Trainers</option><option value="Staff">Staff</option></select>
       </label>
       <label>Status

@@ -28,6 +28,10 @@ export class DashboardService {
     );
   }
 
+  getExpiringPTClients(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/expiring-pt-clients`);
+  }
+
   getMembershipExpiry(filters: {
     status?: string;
     search?: string;

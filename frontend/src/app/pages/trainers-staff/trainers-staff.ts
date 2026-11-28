@@ -124,6 +124,12 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   financialSummary: Record<string, number> | null = null;
   financialTrainers: TrainerFinancialRow[] = [];
   financialLimitations: string[] = [];
+  expiringPTCount = 0;
+  expiringPTRecords: any[] = [];
+  expiringPTLoading = false;
+  expiringPTError = '';
+  expiringPTSearch = '';
+  expiringPTPanelOpen = false;
   ptDetailsPaymentId = '';
   trainerPage = 1;
   staffPage = 1;
@@ -222,6 +228,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   private trainerRequest?: Subscription;
   private staffRequest?: Subscription;
   private financialRequest?: Subscription;
+  private expiringPTRequest?: Subscription;
   private ptPackageRequest?: Subscription;
   private ptAssignedMembersRequest?: Subscription;
   private trainerSearchTimer?: ReturnType<typeof setTimeout>;
@@ -234,6 +241,8 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    if (this.roleMode === 'Trainer') this.reportRole = 'Trainer';
+    if (this.roleMode === 'Staff') this.reportRole = 'Staff';
     this.load();
     this.loadReport();
   }
@@ -241,6 +250,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['active'] && !changes['active'].firstChange && this.active) {
       this.loadFinancialPerformance();
+      if (this.roleMode !== 'Staff') this.loadExpiringPTClients();
       if (this.ptTrainer) this.loadPTPackages();
     }
   }
@@ -252,6 +262,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     this.trainerRequest?.unsubscribe();
     this.staffRequest?.unsubscribe();
     this.financialRequest?.unsubscribe();
+    this.expiringPTRequest?.unsubscribe();
     this.ptPackageRequest?.unsubscribe();
     this.ptAssignedMembersRequest?.unsubscribe();
   }
@@ -276,7 +287,44 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     this.errorMessage = '';
     if (this.roleMode !== 'Staff') this.loadDirectory('Trainer');
     if (this.roleMode !== 'Trainer') this.loadDirectory('Staff');
-    if (this.roleMode !== 'Staff') this.loadFinancialPerformance();
+    if (this.roleMode !== 'Staff') {
+      this.loadFinancialPerformance();
+      this.loadExpiringPTClients();
+    }
+  }
+
+  loadExpiringPTClients(): void {
+    this.expiringPTRequest?.unsubscribe();
+    this.expiringPTLoading = true;
+    this.expiringPTError = '';
+    this.expiringPTRequest = this.management.getExpiringPTClients({
+      search: this.expiringPTSearch
+    }).pipe(finalize(() => {
+      this.expiringPTLoading = false;
+      this.changeDetector.markForCheck();
+    })).subscribe({
+      next: response => {
+        if (!response?.success) {
+          this.expiringPTError = 'Unable to load expiring PT clients.';
+          return;
+        }
+        this.expiringPTRecords = response.records || [];
+        this.expiringPTCount = response.total || this.expiringPTRecords.length;
+      },
+      error: error => {
+        this.expiringPTError = error.error?.message || 'Unable to load expiring PT clients.';
+      }
+    });
+  }
+
+  openExpiringPTPanel(): void {
+    this.expiringPTPanelOpen = true;
+    this.loadExpiringPTClients();
+  }
+
+  expiringLabel(days: number): string {
+    if (days <= 0) return 'Expires Today';
+    return `${days} ${days === 1 ? 'Day' : 'Days'} Left`;
   }
 
   loadFinancialPerformance(): void {
@@ -1092,7 +1140,7 @@ export class TrainersStaff implements OnInit, OnChanges, OnDestroy {
     this.reportLoading = true;
     this.reportError = '';
     this.management.getTrainerStaffReport({
-      role: this.reportRole,
+      role: this.roleMode === 'Combined' ? this.reportRole : this.roleMode,
       status: this.reportStatus,
       from: this.reportFrom,
       to: this.reportTo

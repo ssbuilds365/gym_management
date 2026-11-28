@@ -20,12 +20,14 @@ const {
   refundTrainerPTPayment
 } = require('../controllers/trainerPTController');
 const { trainerFinancialPerformance } = require('../controllers/trainerFinanceController');
+const { listExpiringPTClients } = require('../controllers/trainerPTExpiryController');
 
 const router = express.Router();
 router.use(protectOwner);
 router.get('/', listTrainerStaff);
 router.post('/', createTrainerStaff);
 router.get('/financial-performance', trainerFinancialPerformance);
+router.get('/expiring-pt-clients', listExpiringPTClients);
 router.get('/reports', getTrainerStaffReport);
 router.get('/members/search', searchAssignableMembers);
 router.post('/pt-payments/:paymentId/refunds', refundTrainerPTPayment);
