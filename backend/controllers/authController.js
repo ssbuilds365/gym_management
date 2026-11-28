@@ -141,6 +141,7 @@ exports.registerOwner = async (req, res) => {
       'Gym',
       'Yoga Studio',
       'Fitness Studio',
+      'Personal Trainer',
       'Other'
     ];
 

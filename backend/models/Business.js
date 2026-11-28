@@ -22,6 +22,7 @@ const businessSchema = new mongoose.Schema(
         'Gym',
         'Yoga Studio',
         'Fitness Studio',
+        'Personal Trainer',
         'Other'
       ],
       required: true

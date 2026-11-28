@@ -106,7 +106,7 @@ export class BusinessSettings implements OnInit, OnDestroy {
     faceAttendanceEnabled: false,
     qrAttendanceEnabled: true
   };
-  readonly businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Other'];
+  readonly businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Personal Trainer', 'Other'];
   readonly gstStates = GST_STATES;
 
   constructor(

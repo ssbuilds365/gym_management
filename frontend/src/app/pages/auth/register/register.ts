@@ -27,6 +27,7 @@ export class Register {
     'Gym',
     'Yoga Studio',
     'Fitness Studio',
+    'Personal Trainer',
     'Other'
   ];
 

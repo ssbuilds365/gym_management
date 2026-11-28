@@ -29,7 +29,7 @@ const businessFields = [
   'faceAttendanceEnabled',
   'qrAttendanceEnabled'
 ];
-const businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Other'];
+const businessTypes = ['Gym', 'Yoga Studio', 'Fitness Studio', 'Personal Trainer', 'Other'];
 const settingsProjection =
   'businessName businessType timeZone ownerName phone email address logoUrl logoStorage subscriptionStatus gstEnabled gstinNumber legalBusinessName registeredBusinessAddress state stateCode gstPercentage taxInclusive faceAttendanceEnabled qrAttendanceEnabled';
 

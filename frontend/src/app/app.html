@@ -141,6 +141,12 @@
 
     <!-- Dashboard -->
     <section *ngIf="selectedMenu === 'Dashboard'" class="dashboard-content">
+      <app-personal-trainer-dashboard
+        *ngIf="businessType === 'Personal Trainer'"
+        (navigate)="selectMenu($event)">
+      </app-personal-trainer-dashboard>
+
+      <ng-container *ngIf="businessType !== 'Personal Trainer'">
 
       <div class="welcome-section">
         <div>
@@ -564,6 +570,7 @@
         <span>© 2026 SS Builds365. All rights reserved.</span>
         <span>Built with ❤️ for Fitness Businesses</span>
       </footer>
+      </ng-container>
     </section>
 
     <!-- Members Module: inline dashboard content -->
@@ -695,6 +702,14 @@
       } @error {
         <p class="module-load-error">Unable to load Global Message.</p>
       }
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Upcoming Sessions'">
+      <app-personal-trainer-sessions></app-personal-trainer-sessions>
+    </div>
+
+    <div [hidden]="selectedMenu !== 'Notes'">
+      <app-personal-trainer-notes></app-personal-trainer-notes>
     </div>
 
     <div [hidden]="selectedMenu !== 'Reports & Analytics'">

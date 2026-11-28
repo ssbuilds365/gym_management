@@ -1,0 +1,58 @@
+<section class="pt-dashboard">
+  <header class="pt-heading">
+    <div><span>BUSINESS OVERVIEW</span><h2>Personal Trainer Dashboard</h2></div>
+    <select [(ngModel)]="period" (ngModelChange)="loadFinancials()" aria-label="Revenue period">
+      <option value="month">This Month</option>
+      <option value="lastMonth">Previous Month</option>
+      <option value="last3Months">Last 3 Months</option>
+      <option value="custom">Custom</option>
+    </select>
+    <input *ngIf="period === 'custom'" type="date" [(ngModel)]="fromDate" (change)="loadFinancials()" aria-label="From date">
+    <input *ngIf="period === 'custom'" type="date" [(ngModel)]="toDate" (change)="loadFinancials()" aria-label="To date">
+  </header>
+  <div class="summary-grid">
+    <article *ngFor="let title of ['Total Members','Active Members','Inactive Members']">
+      <span>{{ title }}</span>
+      <strong *ngIf="!summaryLoading">{{ title === 'Total Members' ? summary?.totalMembers : (title === 'Active Members' ? summary?.activeMembers : summary?.inactiveMembers) }}</strong>
+      <div class="card-skeleton" *ngIf="summaryLoading" aria-label="Loading member summary"></div>
+      <button type="button" class="section-retry" *ngIf="summaryError" (click)="loadSummary()">Retry</button>
+      <small class="error" *ngIf="summaryError">{{ summaryError }}</small>
+    </article>
+    <article *ngFor="let title of ['Monthly Revenue','Monthly Expenses','Monthly Profit']">
+      <span>{{ title }}</span>
+      <strong *ngIf="!financialLoading">{{ title === 'Monthly Revenue' ? currency(financials?.monthlyRevenue) : (title === 'Monthly Expenses' ? currency(financials?.monthlyExpenses) : currency(financials?.monthlyProfit)) }}</strong>
+      <div class="card-skeleton" *ngIf="financialLoading" aria-label="Loading financial summary"></div>
+      <button type="button" class="section-retry" *ngIf="financialError" (click)="loadFinancials()">Retry</button>
+      <small class="error" *ngIf="financialError">{{ financialError }}</small>
+    </article>
+  </div>
+    <div class="pt-columns">
+      <section class="panel">
+        <div class="panel-heading"><div><span>NEXT APPOINTMENTS</span><h3>Upcoming Sessions</h3></div><button type="button" (click)="navigate.emit('Upcoming Sessions')">View All</button></div>
+        <div class="section-skeleton" *ngIf="sessionsLoading">Loading upcoming sessions…</div>
+        <button type="button" class="section-retry" *ngIf="sessionsError" (click)="loadSessions()">Retry</button>
+        <p class="error" *ngIf="sessionsError">{{ sessionsError }}</p>
+        <div class="list-row" *ngFor="let session of upcomingSessions">
+          <strong>{{ session.client?.fullName || 'Client' }}</strong>
+          <span>{{ session.client?.phone || '—' }}</span>
+          <span>{{ session.startAt | date:'MMM d, y, h:mm a' }}</span>
+          <b>{{ session.title }}</b>
+        </div>
+        <p class="empty" *ngIf="!sessionsLoading && !sessionsError && !upcomingSessions.length">No upcoming sessions.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><div><span>NEXT 5 DAYS</span><h3>Expiring Training Plans</h3></div></div>
+        <div class="section-skeleton" *ngIf="plansLoading">Loading expiring training plans…</div>
+        <button type="button" class="section-retry" *ngIf="plansError" (click)="loadExpiringPlans()">Retry</button>
+        <p class="error" *ngIf="plansError">{{ plansError }}</p>
+        <div class="list-row" *ngFor="let plan of expiringPlans">
+          <strong>{{ plan.member.fullName }}</strong>
+          <span>{{ plan.member.memberId || plan.member._id }}</span>
+          <span>{{ plan.member.phone || '—' }}</span>
+          <b>{{ plan.packageName }} · {{ remainingLabel(plan.remainingDays) }}</b>
+          <small>{{ plan.expiryDate | date:'mediumDate' }}</small>
+        </div>
+        <p class="empty" *ngIf="!plansLoading && !plansError && !expiringPlans.length">No training plans expire in the next 5 days.</p>
+      </section>
+    </div>
+</section>

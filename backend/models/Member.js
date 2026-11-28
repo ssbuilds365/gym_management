@@ -145,6 +145,7 @@ memberSchema.index(
 memberSchema.index({ tenantId: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 memberSchema.index({ tenantId: 1, assignedTrainerId: 1 });
+memberSchema.index({ tenantId: 1, businessId: 1, deletedAt: 1, status: 1 });
 memberSchema.index({ tenantId: 1, importBatchId: 1, deletedAt: 1 });
 memberSchema.index(
     { tenantId: 1, sourceEnquiryId: 1 },

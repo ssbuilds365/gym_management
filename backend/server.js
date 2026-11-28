@@ -66,6 +66,7 @@ app.use('/api/system', require('./routes/systemRoutes'));
 app.use('/api/global-messages', require('./routes/globalMessageRoutes'));
 app.use('/api/kiosk', require('./routes/kioskRoutes'));
 app.use('/api/biometric', require('./routes/biometricRoutes'));
+app.use('/api/personal-trainer', require('./routes/personalTrainerRoutes'));
 
 // Root Route
 app.get('/', (req, res) => {

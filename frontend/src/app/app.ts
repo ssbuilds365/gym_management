@@ -23,6 +23,9 @@ import { Enquiries } from './pages/enquiries/enquiries';
 import { GlobalMessage } from './pages/global-message/global-message';
 import { DatabaseStorage } from './pages/database-storage/database-storage';
 import { SessionActivityService } from './services/session-activity';
+import { PersonalTrainerDashboard } from './pages/personal-trainer-dashboard/personal-trainer-dashboard';
+import { PersonalTrainerSessions } from './pages/personal-trainer-sessions/personal-trainer-sessions';
+import { PersonalTrainerNotes } from './pages/personal-trainer-notes/personal-trainer-notes';
 
 import { environment } from '../environments/environment';
 
@@ -47,7 +50,10 @@ export const isAttendanceKioskUrl = (url: string): boolean =>
     ExpenseTracker,
     Enquiries,
     GlobalMessage,
-    DatabaseStorage
+    DatabaseStorage,
+    PersonalTrainerDashboard,
+    PersonalTrainerSessions,
+    PersonalTrainerNotes
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss'
@@ -67,6 +73,7 @@ export class App implements OnInit, OnDestroy {
   sessionRemainingMs = 30 * 60 * 1000;
 
   businessName = environment.appName;
+  businessType = 'Gym';
   businessLogoUrl = '';
   ownerName = 'Admin';
 
@@ -162,6 +169,72 @@ export class App implements OnInit, OnDestroy {
     }
   ];
 
+  configureNavigation(businessType: string): void {
+    this.businessType = businessType === 'Personal Trainer' ? 'Personal Trainer' : 'Gym';
+    if (this.businessType === 'Personal Trainer') {
+      this.menuGroups = [
+        {
+          title: 'MAIN MENU',
+          items: [
+            { name: 'Dashboard', icon: '⌂' },
+            { name: 'Members', icon: '♙' },
+            { name: 'Attendance', icon: '◷' },
+            { name: 'Payments & Fees', icon: '₹' }
+          ]
+        },
+        {
+          title: 'MANAGEMENT',
+          items: [
+            { name: 'Expense Tracker', icon: '₹' },
+            { name: 'Enquiry Management', icon: '◎' },
+            { name: 'Global Message', icon: '◉' },
+            { name: 'Upcoming Sessions', icon: '◷' },
+            { name: 'Notes', icon: '▤' },
+            { name: 'Reports & Analytics', icon: '▥' }
+          ]
+        },
+        {
+          title: 'SYSTEM',
+          items: [
+            { name: 'Settings', icon: '⚙' },
+            { name: 'Database Storage', icon: '▦' }
+          ]
+        }
+      ];
+      return;
+    }
+    this.menuGroups = [
+      {
+        title: 'MAIN MENU',
+        items: [
+          { name: 'Dashboard', icon: '⌂' },
+          { name: 'Members', icon: '♙' },
+          { name: 'Membership Plans', icon: '▤' },
+          { name: 'Attendance', icon: '◷' },
+          { name: 'Payments & Fees', icon: '₹' }
+        ]
+      },
+      {
+        title: 'MANAGEMENT',
+        items: [
+          { name: 'Expense Tracker', icon: '₹' },
+          { name: 'Enquiry Management', icon: '◎' },
+          { name: 'Global Message', icon: '◉' },
+          { name: 'Trainers', icon: '♟' },
+          { name: 'Staff', icon: '♙' },
+          { name: 'Reports & Analytics', icon: '▥' }
+        ]
+      },
+      {
+        title: 'SYSTEM',
+        items: [
+          { name: 'Settings', icon: '⚙' },
+          { name: 'Database Storage', icon: '▦' }
+        ]
+      }
+    ];
+  }
+
   constructor(
     private router: Router,
     private authService: AuthService,
@@ -176,6 +249,7 @@ export class App implements OnInit, OnDestroy {
       .subscribe(() => {
         if (!this.isAuthenticated) return;
         if (this.selectedMenu === 'Dashboard') {
+          if (this.businessType === 'Personal Trainer') return;
           if (this.dashboardLoading) {
             this.dashboardRefreshQueued = true;
           } else {
@@ -286,8 +360,9 @@ export class App implements OnInit, OnDestroy {
             this.ownerName = response.owner.name || 'Owner';
             this.businessName = response.business.businessName || this.appName;
             this.businessLogoUrl = response.business.logoUrl || '';
+            this.configureNavigation(response.business.businessType || 'Gym');
             this.selectedMenu = currentUrl.startsWith('/members') ? 'Members' : 'Dashboard';
-            this.loadDashboardData();
+            if (this.businessType !== 'Personal Trainer') this.loadDashboardData();
           } else {
             this.handleInvalidSession('revoked');
           }
@@ -416,13 +491,17 @@ export class App implements OnInit, OnDestroy {
 
   // SIDEBAR MENU
   selectMenu(name: string): void {
+    if (
+      this.businessType === 'Personal Trainer' &&
+      ['Membership Plans', 'Trainers', 'Staff'].includes(name)
+    ) return;
 
     if (name !== 'Members') this.memberToFocus = null;
     this.selectedMenu = name;
     this.mobileMenuOpen = false;
 
     if (name === 'Dashboard') {
-      this.loadDashboardData(true);
+      if (this.businessType !== 'Personal Trainer') this.loadDashboardData(true);
     }
   }
 
@@ -469,6 +548,9 @@ export class App implements OnInit, OnDestroy {
 
   // DASHBOARD API
   loadDashboardData(force = false): void {
+    if (this.businessType === 'Personal Trainer') {
+      return;
+    }
 
     if (this.dashboardLoading) {
       return;

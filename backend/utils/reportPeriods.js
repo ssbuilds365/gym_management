@@ -63,6 +63,16 @@ const resolveReportPeriod = (query, now = new Date()) => {
       });
       toExclusive = localStart({ ...today, day: 1 });
       break;
+    case 'last3Months': {
+      const firstMonth = new Date(Date.UTC(today.year, today.month - 3, 1));
+      from = localStart({
+        year: firstMonth.getUTCFullYear(),
+        month: firstMonth.getUTCMonth() + 1,
+        day: 1
+      });
+      toExclusive = localStart(shiftedDay(today, 1));
+      break;
+    }
     case 'year':
       from = localStart({ year: today.year, month: 1, day: 1 });
       toExclusive = localStart(shiftedDay(today, 1));

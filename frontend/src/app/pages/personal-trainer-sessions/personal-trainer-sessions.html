@@ -1,0 +1,16 @@
+<section class="pt-page">
+  <header><div><span>CLIENT SCHEDULE</span><h2>Upcoming Sessions</h2></div><button type="button" class="primary" (click)="showForm = true">+ Add Session</button></header>
+  <p class="error" *ngIf="error">{{ error }}</p><p class="success" *ngIf="success">{{ success }}</p>
+  <form class="session-form" *ngIf="showForm" (ngSubmit)="save()">
+    <label>Client<select name="memberId" [(ngModel)]="form.memberId" required><option value="">Select client</option><option *ngFor="let client of clients" [value]="client._id">{{ client.fullName }} · {{ client.memberId }}</option></select></label>
+    <label>Session Title / Type<input name="title" [(ngModel)]="form.title" maxlength="120" required></label>
+    <label>Session Date<input name="date" type="date" [(ngModel)]="form.date" required></label>
+    <label>Start Time<input name="startTime" type="time" [(ngModel)]="form.startTime" required></label>
+    <label>End Time<input name="endTime" type="time" [(ngModel)]="form.endTime" required></label>
+    <label class="full">Notes<textarea name="notes" [(ngModel)]="form.notes" maxlength="2000"></textarea></label>
+    <div class="form-actions"><button type="submit" class="primary">{{ editingId ? 'Save Changes' : 'Create Session' }}</button><button type="button" (click)="cancel()">Cancel</button></div>
+  </form>
+  <div class="filters"><input type="date" [(ngModel)]="dateFilter" (change)="load()" aria-label="Filter date"><select [(ngModel)]="statusFilter" (change)="load()"><option value="">All statuses</option><option>Scheduled</option><option>Completed</option><option>Cancelled</option></select></div>
+  <div class="desktop-table"><table><thead><tr><th>Client</th><th>Date</th><th>Start</th><th>End</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody><tr *ngFor="let session of sessions"><td>{{ session.client?.fullName }}</td><td>{{ session.startAt | date:'mediumDate' }}</td><td>{{ session.startAt | date:'shortTime' }}</td><td>{{ session.endAt | date:'shortTime' }}</td><td>{{ session.title }}</td><td>{{ session.status }}</td><td><button type="button" (click)="edit(session)">Edit</button><button type="button" class="danger" (click)="delete(session)">Delete</button></td></tr></tbody></table></div>
+  <div class="mobile-cards"><article *ngFor="let session of sessions"><strong>{{ session.client?.fullName }}</strong><p>{{ session.startAt | date:'mediumDate' }} · {{ session.startAt | date:'shortTime' }}–{{ session.endAt | date:'shortTime' }}</p><p>{{ session.title }} · {{ session.status }}</p><div><button type="button" (click)="edit(session)">Edit</button><button type="button" (click)="delete(session)">Delete</button></div></article></div>
+</section>

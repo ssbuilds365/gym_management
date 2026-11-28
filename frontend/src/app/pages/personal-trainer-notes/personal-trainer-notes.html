@@ -1,0 +1,13 @@
+<section class="notes-page">
+  <header><div><span>PERSONAL WORKSPACE</span><h2>Notes</h2></div><button type="button" class="primary" (click)="showForm = true">+ Add Note</button></header>
+  <p class="error" *ngIf="error">{{ error }}</p>
+  <input class="search" [(ngModel)]="search" (ngModelChange)="load()" placeholder="Search notes by title or content…" aria-label="Search notes">
+  <form *ngIf="showForm" class="note-editor" (ngSubmit)="save()">
+    <label>Title<input [(ngModel)]="form.title" name="title" maxlength="160" required></label>
+    <label>Note Content<textarea [(ngModel)]="form.content" name="content" maxlength="10000" required></textarea></label>
+    <div><button type="submit" class="primary">{{ editingId ? 'Save Changes' : 'Create Note' }}</button><button type="button" (click)="cancel()">Cancel</button></div>
+  </form>
+  <div class="notes-grid">
+    <article *ngFor="let note of notes"><h3>{{ note.title }}</h3><p>{{ note.content }}</p><small>Created {{ note.createdAt | date:'medium' }}</small><small>Updated {{ note.updatedAt | date:'medium' }}</small><div><button type="button" (click)="edit(note)">Edit</button><button type="button" (click)="delete(note)">Delete</button></div></article>
+  </div>
+</section>

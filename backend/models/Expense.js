@@ -167,5 +167,6 @@ expenseSchema.index({ tenantId: 1, archivedAt: 1, deletedAt: 1, expenseDate: -1 
 expenseSchema.index({ tenantId: 1, deletedAt: 1, category: 1, expenseDate: -1 });
 expenseSchema.index({ tenantId: 1, deletedAt: 1, status: 1, expenseDate: -1 });
 expenseSchema.index({ tenantId: 1, deletedAt: 1, vendor: 1, expenseDate: -1 });
+expenseSchema.index({ tenantId: 1, businessId: 1, deletedAt: 1, archivedAt: 1, expenseDate: -1 });
 
 module.exports = mongoose.model('Expense', expenseSchema);

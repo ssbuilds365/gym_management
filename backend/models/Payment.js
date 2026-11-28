@@ -131,5 +131,6 @@ paymentSchema.index({ tenantId: 1, businessId: 1, membershipId: 1, status: 1 });
 paymentSchema.index({ tenantId: 1, status: 1 });
 paymentSchema.index({ tenantId: 1, paymentDate: -1 });
 paymentSchema.index({ tenantId: 1, attributedTrainerId: 1, status: 1, paymentDate: -1 });
+paymentSchema.index({ tenantId: 1, businessId: 1, status: 1, paymentDate: -1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);
